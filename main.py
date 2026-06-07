@@ -190,7 +190,7 @@ def get_orders():
 
 
 # -----------------------------
-# Nitrado API wrapper (basic skeleton)
+# Nitrado API wrapper (gameserver)
 # -----------------------------
 class NitradoAPI:
     def __init__(self):
@@ -201,53 +201,144 @@ class NitradoAPI:
         self.token, self.service_id = get_settings()
 
     def _headers(self):
-        return {"Authorization": f"Bearer {self.token}"} if self.token else {}
+        if not self.token:
+            return {}
+        return {"Authorization": f"Bearer {self.token}"}
+
+    def is_connected(self) -> bool:
+        return bool(self.token and self.service_id)
 
     def get_status(self):
-        if not self.token or not self.service_id:
+        if not self.is_connected():
             return None
         url = f"{self.base_url}/services/{self.service_id}/gameservers"
         r = requests.get(url, headers=self._headers(), timeout=10)
         if r.status_code != 200:
+            logger.warning(f"Nitrado get_status failed: {r.status_code} {r.text}")
             return None
         return r.json()
 
-    def restart_server(self):
-        if not self.token or not self.service_id:
+    def restart_server(self) -> bool:
+        if not self.is_connected():
             return False
         url = f"{self.base_url}/services/{self.service_id}/gameservers/restart"
         r = requests.post(url, headers=self._headers(), timeout=10)
-        return r.status_code == 200
+        if r.status_code != 200:
+            logger.warning(f"Nitrado restart_server failed: {r.status_code} {r.text}")
+            return False
+        return True
 
     def get_players(self):
-        if not self.token or not self.service_id:
+        if not self.is_connected():
             return []
-        # Placeholder endpoint – adjust to your real Nitrado API
+        # This endpoint is typical for gameserver player list; adjust if needed.
         url = f"{self.base_url}/services/{self.service_id}/gameservers/games/players"
         r = requests.get(url, headers=self._headers(), timeout=10)
         if r.status_code != 200:
+            logger.warning(f"Nitrado get_players failed: {r.status_code} {r.text}")
             return []
         try:
             data = r.json()
             return data.get("data", {}).get("players", [])
-        except Exception:
+        except Exception as e:
+            logger.exception("Failed to parse players JSON: %s", e)
             return []
 
-    def ban_player(self, name: str):
-        logger.info(f"[NitradoAPI] Ban requested for {name}")
+    # For DayZ, bans/whitelists are usually managed via files (ban.txt, whitelist.txt).
+    # Here we implement API calls that *fail cleanly* if something is wrong.
+    def _read_file(self, path: str) -> str | None:
+        if not self.is_connected():
+            return None
+        url = f"{self.base_url}/services/{self.service_id}/gameservers/files"
+        params = {"file": path}
+        r = requests.get(url, headers=self._headers(), params=params, timeout=10)
+        if r.status_code != 200:
+            logger.warning(f"Nitrado read_file failed ({path}): {r.status_code} {r.text}")
+            return None
+        try:
+            data = r.json()
+            return data.get("data", {}).get("content", "")
+        except Exception as e:
+            logger.exception("Failed to parse file JSON: %s", e)
+            return None
+
+    def _write_file(self, path: str, content: str) -> bool:
+        if not self.is_connected():
+            return False
+        url = f"{self.base_url}/services/{self.service_id}/gameservers/files"
+        payload = {"file": path, "content": content}
+        r = requests.post(url, headers=self._headers(), data=payload, timeout=10)
+        if r.status_code != 200:
+            logger.warning(f"Nitrado write_file failed ({path}): {r.status_code} {r.text}")
+            return False
         return True
 
-    def unban_player(self, name: str):
-        logger.info(f"[NitradoAPI] Unban requested for {name}")
-        return True
+    def ban_player(self, name: str) -> bool:
+        # Adjust path if your ban file is different
+        path = "/dayzxb/config/ban.txt"
+        content = self._read_file(path)
+        if content is None:
+            return False
 
-    def whitelist_add(self, name: str):
-        logger.info(f"[NitradoAPI] Whitelist add requested for {name}")
-        return True
+        lines = [l.strip() for l in content.splitlines() if l.strip()]
+        if name in lines:
+            # Already banned
+            return True
+        lines.append(name)
+        new_content = "\n".join(lines) + "\n"
+        ok = self._write_file(path, new_content)
+        if ok:
+            logger.info(f"[NitradoAPI] Banned {name}")
+        return ok
 
-    def whitelist_remove(self, name: str):
-        logger.info(f"[NitradoAPI] Whitelist remove requested for {name}")
-        return True
+    def unban_player(self, name: str) -> bool:
+        path = "/dayzxb/config/ban.txt"
+        content = self._read_file(path)
+        if content is None:
+            return False
+
+        lines = [l.strip() for l in content.splitlines() if l.strip()]
+        if name not in lines:
+            # Not in ban list, treat as success
+            return True
+        lines = [l for l in lines if l != name]
+        new_content = "\n".join(lines) + "\n" if lines else ""
+        ok = self._write_file(path, new_content)
+        if ok:
+            logger.info(f"[NitradoAPI] Unbanned {name}")
+        return ok
+
+    def whitelist_add(self, name: str) -> bool:
+        path = "/dayzxb/config/whitelist.txt"
+        content = self._read_file(path)
+        if content is None:
+            return False
+
+        lines = [l.strip() for l in content.splitlines() if l.strip()]
+        if name in lines:
+            return True
+        lines.append(name)
+        new_content = "\n".join(lines) + "\n"
+        ok = self._write_file(path, new_content)
+        if ok:
+            logger.info(f"[NitradoAPI] Whitelist add {name}")
+        return ok
+
+    def whitelist_remove(self, name: str) -> bool:
+        path = "/dayzxb/config/whitelist.txt"
+        content = self._read_file(path)
+        if content is None:
+            return False
+
+        lines = [l.strip() for l in content.splitlines() if l.strip()]
+        if name not in lines:
+            return True
+        lines = [l for l in lines if l != name]
+        new_content = "\n".join(lines) + "\n" if lines else ""
+        ok = self._write_file(path, new_content)
+        if ok:
+            logger.info(f"[NitradoAPI] Whitelist remove {name}")
+        return ok
 
 
 nitrado_api: NitradoAPI | None = None
@@ -278,6 +369,13 @@ def user_is_admin(member: discord.Member) -> bool:
     return any(r.id == ADMIN_ROLE_ID for r in member.roles)
 
 
+def api_not_connected_msg(interaction: discord.Interaction):
+    return interaction.response.send_message(
+        "Nitrado API is not connected. Use `/activate` first.",
+        ephemeral=True,
+    )
+
+
 # -----------------------------
 # Slash commands
 # -----------------------------
@@ -296,13 +394,13 @@ async def activate(interaction: discord.Interaction, token: str, service_id: str
 
 @tree.command(name="serverstatus", description="Get Nitrado server status")
 async def serverstatus(interaction: discord.Interaction):
-    if not nitrado_api:
-        await interaction.response.send_message("Nitrado API not initialized.", ephemeral=True)
+    if not nitrado_api or not nitrado_api.is_connected():
+        await api_not_connected_msg(interaction)
         return
 
     data = nitrado_api.get_status()
     if not data:
-        await interaction.response.send_message("Could not fetch server status. Is /activate set?", ephemeral=True)
+        await interaction.response.send_message("Could not fetch server status. Check `/activate`.", ephemeral=True)
         return
 
     await interaction.response.send_message(f"Server status raw JSON:\n```json\n{data}\n```", ephemeral=True)
@@ -314,21 +412,21 @@ async def restartserver(interaction: discord.Interaction):
         await interaction.response.send_message("You don't have permission to use this.", ephemeral=True)
         return
 
-    if not nitrado_api:
-        await interaction.response.send_message("Nitrado API not initialized.", ephemeral=True)
+    if not nitrado_api or not nitrado_api.is_connected():
+        await api_not_connected_msg(interaction)
         return
 
     ok = nitrado_api.restart_server()
     if ok:
         await interaction.response.send_message("Server restart requested.", ephemeral=True)
     else:
-        await interaction.response.send_message("Failed to request restart. Check /activate.", ephemeral=True)
+        await interaction.response.send_message("Failed to request restart. Check `/activate`.", ephemeral=True)
 
 
 @tree.command(name="players", description="List online players from Nitrado")
 async def players(interaction: discord.Interaction):
-    if not nitrado_api:
-        await interaction.response.send_message("Nitrado API not initialized.", ephemeral=True)
+    if not nitrado_api or not nitrado_api.is_connected():
+        await api_not_connected_msg(interaction)
         return
 
     players_list = nitrado_api.get_players()
@@ -350,15 +448,15 @@ async def ban(interaction: discord.Interaction, player_name: str):
         await interaction.response.send_message("You don't have permission to use this.", ephemeral=True)
         return
 
-    if not nitrado_api:
-        await interaction.response.send_message("Nitrado API not initialized.", ephemeral=True)
+    if not nitrado_api or not nitrado_api.is_connected():
+        await api_not_connected_msg(interaction)
         return
 
     ok = nitrado_api.ban_player(player_name)
     if ok:
-        await interaction.response.send_message(f"Ban requested for {player_name}.", ephemeral=True)
+        await interaction.response.send_message(f"Ban requested for `{player_name}`.", ephemeral=True)
     else:
-        await interaction.response.send_message("Ban failed.", ephemeral=True)
+        await interaction.response.send_message("Ban failed. Check logs and `/activate`.", ephemeral=True)
 
 
 @tree.command(name="unban", description="Unban a player via Nitrado")
@@ -367,15 +465,15 @@ async def unban(interaction: discord.Interaction, player_name: str):
         await interaction.response.send_message("You don't have permission to use this.", ephemeral=True)
         return
 
-    if not nitrado_api:
-        await interaction.response.send_message("Nitrado API not initialized.", ephemeral=True)
+    if not nitrado_api or not nitrado_api.is_connected():
+        await api_not_connected_msg(interaction)
         return
 
     ok = nitrado_api.unban_player(player_name)
     if ok:
-        await interaction.response.send_message(f"Unban requested for {player_name}.", ephemeral=True)
+        await interaction.response.send_message(f"Unban requested for `{player_name}`.", ephemeral=True)
     else:
-        await interaction.response.send_message("Unban failed.", ephemeral=True)
+        await interaction.response.send_message("Unban failed. Check logs and `/activate`.", ephemeral=True)
 
 
 @tree.command(name="whitelist_add", description="Add a player to whitelist")
@@ -384,15 +482,15 @@ async def whitelist_add(interaction: discord.Interaction, player_name: str):
         await interaction.response.send_message("You don't have permission to use this.", ephemeral=True)
         return
 
-    if not nitrado_api:
-        await interaction.response.send_message("Nitrado API not initialized.", ephemeral=True)
+    if not nitrado_api or not nitrado_api.is_connected():
+        await api_not_connected_msg(interaction)
         return
 
     ok = nitrado_api.whitelist_add(player_name)
     if ok:
-        await interaction.response.send_message(f"Whitelist add requested for {player_name}.", ephemeral=True)
+        await interaction.response.send_message(f"Whitelist add requested for `{player_name}`.", ephemeral=True)
     else:
-        await interaction.response.send_message("Whitelist add failed.", ephemeral=True)
+        await interaction.response.send_message("Whitelist add failed. Check logs and `/activate`.", ephemeral=True)
 
 
 @tree.command(name="whitelist_remove", description="Remove a player from whitelist")
@@ -401,15 +499,15 @@ async def whitelist_remove(interaction: discord.Interaction, player_name: str):
         await interaction.response.send_message("You don't have permission to use this.", ephemeral=True)
         return
 
-    if not nitrado_api:
-        await interaction.response.send_message("Nitrado API not initialized.", ephemeral=True)
+    if not nitrado_api or not nitrado_api.is_connected():
+        await api_not_connected_msg(interaction)
         return
 
     ok = nitrado_api.whitelist_remove(player_name)
     if ok:
-        await interaction.response.send_message(f"Whitelist remove requested for {player_name}.", ephemeral=True)
+        await interaction.response.send_message(f"Whitelist remove requested for `{player_name}`.", ephemeral=True)
     else:
-        await interaction.response.send_message("Whitelist remove failed.", ephemeral=True)
+        await interaction.response.send_message("Whitelist remove failed. Check logs and `/activate`.", ephemeral=True)
 
 
 @tree.command(name="addorder", description="Add an order")
@@ -608,8 +706,8 @@ def dashboard_server():
     if "user" not in session:
         return redirect("/login")
 
-    if not nitrado_api:
-        return "<h1>Server Status</h1><p>Nitrado API not initialized.</p><a href='/dashboard'>Back</a>"
+    if not nitrado_api or not nitrado_api.is_connected():
+        return "<h1>Server Status</h1><p>Nitrado API not connected. Use /activate.</p><a href='/dashboard'>Back</a>"
 
     data = nitrado_api.get_status()
     if not data:
