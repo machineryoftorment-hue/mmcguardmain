@@ -2,6 +2,8 @@ import os
 import sqlite3
 import threading
 import logging
+import json
+import re
 from datetime import datetime
 
 import discord
@@ -26,15 +28,20 @@ DISCORD_CLIENT_ID = os.environ.get("DISCORD_CLIENT_ID")
 DISCORD_CLIENT_SECRET = os.environ.get("DISCORD_CLIENT_SECRET")
 OAUTH_REDIRECT_URI = os.environ.get("OAUTH_REDIRECT_URI")
 
-# Your Discord server ID (GUILD_ID)
 GUILD_ID = int(os.environ.get("GUILD_ID", "1404279040893911103"))
-
 ADMIN_ROLE_ID = int(os.environ.get("ADMIN_ROLE_ID", "0"))
 
-CONNECTION_CHANNEL_ID = int(os.environ.get("CONNECTION_CHANNEL_ID", "0"))
+# Channel where Nitrado logs (with positions) are posted
+LOG_FEED_CHANNEL_ID = int(os.environ.get("LOG_FEED_CHANNEL_ID", "0"))
 EXPLOSIVE_CHANNEL_ID = int(os.environ.get("EXPLOSIVE_CHANNEL_ID", "0"))
 
 DB_PATH = os.environ.get("DB_PATH", "mmcguard.db")
+
+# World/map constants (Chernarus ~15360x15360, canvas 1024x1024)
+WORLD_SIZE = 15360.0
+CANVAS_SIZE = 1024.0
+CANVAS_TO_WORLD = WORLD_SIZE / CANVAS_SIZE  # ~15
+
 
 # -----------------------------
 # SQLite helpers
@@ -60,15 +67,17 @@ def init_db():
         """
     )
 
-    # Players
+    # Players (for last known position)
     cur.execute(
         """
         CREATE TABLE IF NOT EXISTS players (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             name TEXT,
-            steam_id TEXT,
-            last_seen TIMESTAMP,
-            status TEXT
+            identity TEXT,
+            x REAL,
+            z REAL,
+            y REAL,
+            last_seen TIMESTAMP
         );
         """
     )
@@ -109,6 +118,18 @@ def init_db():
             user_id TEXT,
             description TEXT,
             created_at TIMESTAMP
+        );
+        """
+    )
+
+    # Zones
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS zones (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT,
+            action TEXT,
+            points TEXT
         );
         """
     )
@@ -189,6 +210,63 @@ def get_orders():
     return rows
 
 
+def save_player_position(name: str, identity: str, x: float, z: float, y: float):
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        INSERT INTO players (name, identity, x, z, y, last_seen)
+        VALUES (?, ?, ?, ?, ?, ?)
+        ON CONFLICT(name) DO UPDATE SET
+            identity = excluded.identity,
+            x = excluded.x,
+            z = excluded.z,
+            y = excluded.y,
+            last_seen = excluded.last_seen;
+        """,
+        (name, identity, x, z, y, datetime.utcnow()),
+    )
+    conn.commit()
+    conn.close()
+
+
+def get_zones():
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute("SELECT id, name, action, points FROM zones ORDER BY id ASC;")
+    rows = cur.fetchall()
+    conn.close()
+    return rows
+
+
+def get_zone(zone_id: int):
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute("SELECT id, name, action, points FROM zones WHERE id = ?;", (zone_id,))
+    row = cur.fetchone()
+    conn.close()
+    return row
+
+
+def update_zone(zone_id: int, name: str, action: str):
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute(
+        "UPDATE zones SET name = ?, action = ? WHERE id = ?;",
+        (name, action, zone_id),
+    )
+    conn.commit()
+    conn.close()
+
+
+def delete_zone(zone_id: int):
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute("DELETE FROM zones WHERE id = ?;", (zone_id,))
+    conn.commit()
+    conn.close()
+
+
 # -----------------------------
 # Nitrado API wrapper (gameserver)
 # -----------------------------
@@ -231,7 +309,6 @@ class NitradoAPI:
     def get_players(self):
         if not self.is_connected():
             return []
-        # This endpoint is typical for gameserver player list; adjust if needed.
         url = f"{self.base_url}/services/{self.service_id}/gameservers/games/players"
         r = requests.get(url, headers=self._headers(), timeout=10)
         if r.status_code != 200:
@@ -244,8 +321,6 @@ class NitradoAPI:
             logger.exception("Failed to parse players JSON: %s", e)
             return []
 
-    # For DayZ, bans/whitelists are usually managed via files (ban.txt, whitelist.txt).
-    # Here we implement API calls that *fail cleanly* if something is wrong.
     def _read_file(self, path: str) -> str | None:
         if not self.is_connected():
             return None
@@ -274,15 +349,12 @@ class NitradoAPI:
         return True
 
     def ban_player(self, name: str) -> bool:
-        # Adjust path if your ban file is different
         path = "/dayzxb/config/ban.txt"
         content = self._read_file(path)
         if content is None:
             return False
-
         lines = [l.strip() for l in content.splitlines() if l.strip()]
         if name in lines:
-            # Already banned
             return True
         lines.append(name)
         new_content = "\n".join(lines) + "\n"
@@ -296,10 +368,8 @@ class NitradoAPI:
         content = self._read_file(path)
         if content is None:
             return False
-
         lines = [l.strip() for l in content.splitlines() if l.strip()]
         if name not in lines:
-            # Not in ban list, treat as success
             return True
         lines = [l for l in lines if l != name]
         new_content = "\n".join(lines) + "\n" if lines else ""
@@ -313,7 +383,6 @@ class NitradoAPI:
         content = self._read_file(path)
         if content is None:
             return False
-
         lines = [l.strip() for l in content.splitlines() if l.strip()]
         if name in lines:
             return True
@@ -329,7 +398,6 @@ class NitradoAPI:
         content = self._read_file(path)
         if content is None:
             return False
-
         lines = [l.strip() for l in content.splitlines() if l.strip()]
         if name not in lines:
             return True
@@ -374,6 +442,74 @@ def api_not_connected_msg(interaction: discord.Interaction):
         "Nitrado API is not connected. Use `/activate` first.",
         ephemeral=True,
     )
+
+
+# -----------------------------
+# Zone math
+# -----------------------------
+def point_in_polygon(x: float, z: float, polygon_points):
+    # Ray casting algorithm
+    inside = False
+    n = len(polygon_points)
+    if n < 3:
+        return False
+    j = n - 1
+    for i in range(n):
+        xi, zi = polygon_points[i]["x"], polygon_points[i]["z"]
+        xj, zj = polygon_points[j]["x"], polygon_points[j]["z"]
+        intersect = ((zi > z) != (zj > z)) and (
+            x < (xj - xi) * (z - zi) / (zj - zi + 1e-9) + xi
+        )
+        if intersect:
+            inside = not inside
+        j = i
+    return inside
+
+
+async def enforce_zones_for_player(name: str, x: float, z: float, y: float):
+    zones = get_zones()
+    if not zones:
+        return
+
+    for zone in zones:
+        try:
+            points = json.loads(zone["points"])
+        except Exception:
+            continue
+
+        if not isinstance(points, list) or len(points) < 3:
+            continue
+
+        if point_in_polygon(x, z, points):
+            action = zone["action"]
+            logger.info(f"[ZONE] Player {name} inside zone '{zone['name']}' action={action}")
+
+            # Simple enforcement:
+            # log: do nothing
+            # warn: send message in log channel
+            # ban: ban via Nitrado
+            # kick/tp: currently treated as warn/log (no direct kick API)
+            channel = bot.get_channel(LOG_FEED_CHANNEL_ID)
+
+            if action == "warn":
+                if channel:
+                    await channel.send(f"⚠ Player `{name}` entered restricted zone `{zone['name']}`.")
+            elif action == "ban":
+                if nitrado_api and nitrado_api.is_connected():
+                    ok = nitrado_api.ban_player(name)
+                    if channel:
+                        if ok:
+                            await channel.send(f"⛔ Player `{name}` banned for entering zone `{zone['name']}`.")
+                        else:
+                            await channel.send(
+                                f"❌ Failed to ban `{name}` for zone `{zone['name']}`. Check Nitrado/API."
+                            )
+            elif action in ("kick", "tp"):
+                if channel:
+                    await channel.send(
+                        f"⚠ (Simulated {action}) Player `{name}` in zone `{zone['name']}` at ({x:.1f},{z:.1f})."
+                    )
+            # log: nothing extra
 
 
 # -----------------------------
@@ -532,16 +668,30 @@ async def orders_cmd(interaction: discord.Interaction):
 # -----------------------------
 # Feed parsing via on_message
 # -----------------------------
+PLAYER_POS_RE = re.compile(
+    r'Player\s+"(?P<name>[^"]+)"\s+\(id=(?P<id>[^ )]+).*?pos=<(?P<x>[\d\.]+),\s*(?P<z>[\d\.]+),\s*(?P<y>[\d\.]+)>\)'
+)
+
+
 @bot.event
 async def on_message(message: discord.Message):
     if message.author == bot.user:
         return
 
-    # Connection feed
-    if message.channel.id == CONNECTION_CHANNEL_ID:
-        logger.info(f"[CONNECTION FEED] {message.content}")
+    # Nitrado log feed with player positions
+    if message.channel.id == LOG_FEED_CHANNEL_ID:
+        for line in message.content.splitlines():
+            m = PLAYER_POS_RE.search(line)
+            if m:
+                name = m.group("name")
+                identity = m.group("id")
+                x = float(m.group("x"))
+                z = float(m.group("z"))
+                y = float(m.group("y"))
+                save_player_position(name, identity, x, z, y)
+                await enforce_zones_for_player(name, x, z, y)
 
-    # Explosive feed
+    # Explosive feed (optional extra logging)
     if message.channel.id == EXPLOSIVE_CHANNEL_ID:
         content = message.content
         try:
@@ -559,7 +709,7 @@ async def on_message(message: discord.Message):
 
 
 # -----------------------------
-# Flask app + OAuth
+# Flask app + OAuth + Dashboard
 # -----------------------------
 app = Flask(__name__)
 app.secret_key = os.environ.get("FLASK_SECRET", "supersecretkey")
@@ -568,19 +718,48 @@ DISCORD_API_BASE = "https://discord.com/api"
 OAUTH_SCOPE = "identify guilds"
 
 
+def render_sidebar(active: str) -> str:
+    def item(label, href, key):
+        base = "block p-2 rounded "
+        if key == active:
+            cls = base + "bg-gray-700"
+        else:
+            cls = base + "hover:bg-gray-700"
+        return f"<a class='{cls}' href='{href}'>{label}</a>"
+
+    return (
+        "<div class='w-64 bg-gray-800 p-6 space-y-4'>"
+        "<h1 class='text-2xl font-bold mb-6'>MMC Guard</h1>"
+        f"{item('Home', '/dashboard', 'home')}"
+        f"{item('Explosives', '/dashboard/explosives', 'explosives')}"
+        f"{item('Kills', '/dashboard/kills', 'kills')}"
+        f"{item('Orders', '/dashboard/orders', 'orders')}"
+        f"{item('Server Status', '/dashboard/server', 'server')}"
+        f"{item('Zones', '/dashboard/zones', 'zones')}"
+        "<a class='block p-2 hover:bg-gray-700 rounded text-red-400' href='/logout'>Logout</a>"
+        "</div>"
+    )
+
+
 @app.route("/")
 def home():
     if "user" in session:
-        return f"""
-        <h1>MMC Guard Dashboard</h1>
-        <p>Logged in as: {session['user']['username']}#{session['user']['discriminator']}</p>
-        <a href='/dashboard'>Go to Dashboard</a><br><br>
-        <a href='/logout'>Logout</a>
-        """
+        return redirect("/dashboard")
     return """
-    <h1>MMC Guard Dashboard</h1>
-    <p>Welcome to the MMC Guard control panel.</p>
-    <a href='/login'>Login with Discord</a>
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>MMC Guard Login</title>
+        <script src="https://cdn.tailwindcss.com"></script>
+    </head>
+    <body class='bg-gray-900 text-gray-200 flex items-center justify-center h-screen'>
+        <div class='bg-gray-800 p-8 rounded shadow-lg text-center'>
+            <h1 class='text-3xl font-bold mb-4'>MMC Guard Dashboard</h1>
+            <p class='mb-6'>Welcome to the MMC Guard control panel.</p>
+            <a href='/login' class='px-4 py-2 bg-blue-600 rounded hover:bg-blue-500'>Login with Discord</a>
+        </div>
+    </body>
+    </html>
     """
 
 
@@ -634,15 +813,24 @@ def dashboard():
     if "user" not in session:
         return redirect("/login")
 
-    return """
-    <h1>MMC Guard Admin Dashboard</h1>
-    <ul>
-        <li><a href='/dashboard/explosives'>Explosives</a></li>
-        <li><a href='/dashboard/kills'>Kills</a></li>
-        <li><a href='/dashboard/orders'>Orders</a></li>
-        <li><a href='/dashboard/server'>Server Status</a></li>
-    </ul>
-    <a href='/logout'>Logout</a>
+    sidebar = render_sidebar("home")
+    return f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>MMC Guard Dashboard</title>
+        <script src="https://cdn.tailwindcss.com"></script>
+    </head>
+    <body class='bg-gray-900 text-gray-200'>
+        <div class='flex h-screen'>
+            {sidebar}
+            <div class='flex-1 p-10'>
+                <h2 class='text-3xl font-bold mb-4'>Welcome to MMC Guard</h2>
+                <p>Select a menu item on the left.</p>
+            </div>
+        </div>
+    </body>
+    </html>
     """
 
 
@@ -657,11 +845,32 @@ def dashboard_explosives():
     rows = cur.fetchall()
     conn.close()
 
-    html = "<h1>Explosives</h1><ul>"
-    for r in rows:
-        html += f"<li>{r['timestamp']} - {r['player_name']} placed {r['item']} at {r['position']}</li>"
-    html += "</ul><a href='/dashboard'>Back</a>"
-    return html
+    sidebar = render_sidebar("explosives")
+    items = "".join(
+        f"<li class='mb-1'>{r['timestamp']} - {r['player_name']} placed {r['item']} at {r['position']}</li>"
+        for r in rows
+    )
+
+    return f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>Explosives</title>
+        <script src="https://cdn.tailwindcss.com"></script>
+    </head>
+    <body class='bg-gray-900 text-gray-200'>
+        <div class='flex h-screen'>
+            {sidebar}
+            <div class='flex-1 p-10'>
+                <h2 class='text-3xl font-bold mb-4'>Explosives</h2>
+                <ul class='list-disc ml-6'>
+                    {items}
+                </ul>
+            </div>
+        </div>
+    </body>
+    </html>
+    """
 
 
 @app.route("/dashboard/kills")
@@ -677,15 +886,35 @@ def dashboard_kills():
     rows = cur.fetchall()
     conn.close()
 
-    html = "<h1>Kills</h1><ul>"
+    sidebar = render_sidebar("kills")
+    items = ""
     for r in rows:
         hs = "HS" if r["headshot"] else ""
-        html += (
-            f"<li>{r['timestamp']} - {r['killer']} killed {r['victim']} "
+        items += (
+            f"<li class='mb-1'>{r['timestamp']} - {r['killer']} killed {r['victim']} "
             f"with {r['weapon']} ({r['distance']}m) {hs}</li>"
         )
-    html += "</ul><a href='/dashboard'>Back</a>"
-    return html
+
+    return f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>Kills</title>
+        <script src="https://cdn.tailwindcss.com"></script>
+    </head>
+    <body class='bg-gray-900 text-gray-200'>
+        <div class='flex h-screen'>
+            {sidebar}
+            <div class='flex-1 p-10'>
+                <h2 class='text-3xl font-bold mb-4'>Kills</h2>
+                <ul class='list-disc ml-6'>
+                    {items}
+                </ul>
+            </div>
+        </div>
+    </body>
+    </html>
+    """
 
 
 @app.route("/dashboard/orders")
@@ -694,11 +923,32 @@ def dashboard_orders():
         return redirect("/login")
 
     rows = get_orders()
-    html = "<h1>Orders</h1><ul>"
-    for r in rows:
-        html += f"<li>#{r['id']} - {r['created_at']} - {r['user_id']}: {r['description']}</li>"
-    html += "</ul><a href='/dashboard'>Back</a>"
-    return html
+    sidebar = render_sidebar("orders")
+    items = "".join(
+        f"<li class='mb-1'>#{r['id']} - {r['created_at']} - {r['user_id']}: {r['description']}</li>"
+        for r in rows
+    )
+
+    return f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>Orders</title>
+        <script src="https://cdn.tailwindcss.com"></script>
+    </head>
+    <body class='bg-gray-900 text-gray-200'>
+        <div class='flex h-screen'>
+            {sidebar}
+            <div class='flex-1 p-10'>
+                <h2 class='text-3xl font-bold mb-4'>Orders</h2>
+                <ul class='list-disc ml-6'>
+                    {items}
+                </ul>
+            </div>
+        </div>
+    </body>
+    </html>
+    """
 
 
 @app.route("/dashboard/server")
@@ -706,14 +956,273 @@ def dashboard_server():
     if "user" not in session:
         return redirect("/login")
 
+    sidebar = render_sidebar("server")
+
     if not nitrado_api or not nitrado_api.is_connected():
-        return "<h1>Server Status</h1><p>Nitrado API not connected. Use /activate.</p><a href='/dashboard'>Back</a>"
+        body = "<p>Nitrado API not connected. Use /activate.</p>"
+    else:
+        data = nitrado_api.get_status()
+        if not data:
+            body = "<p>Could not fetch status. Check /activate.</p>"
+        else:
+            body = f"<pre class='bg-gray-800 p-4 rounded text-xs overflow-auto'>{data}</pre>"
 
-    data = nitrado_api.get_status()
-    if not data:
-        return "<h1>Server Status</h1><p>Could not fetch status. Check /activate.</p><a href='/dashboard'>Back</a>"
+    return f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>Server Status</title>
+        <script src="https://cdn.tailwindcss.com"></script>
+    </head>
+    <body class='bg-gray-900 text-gray-200'>
+        <div class='flex h-screen'>
+            {sidebar}
+            <div class='flex-1 p-10'>
+                <h2 class='text-3xl font-bold mb-4'>Server Status</h2>
+                {body}
+            </div>
+        </div>
+    </body>
+    </html>
+    """
 
-    return f"<h1>Server Status</h1><pre>{data}</pre><a href='/dashboard'>Back</a>"
+
+@app.route("/dashboard/zones")
+def dashboard_zones():
+    if "user" not in session:
+        return redirect("/login")
+
+    sidebar = render_sidebar("zones")
+    zones = get_zones()
+
+    rows_html = ""
+    for z in zones:
+        rows_html += (
+            f"<tr>"
+            f"<td class='border border-gray-700 px-2 py-1'>{z['id']}</td>"
+            f"<td class='border border-gray-700 px-2 py-1'>{z['name']}</td>"
+            f"<td class='border border-gray-700 px-2 py-1'>{z['action']}</td>"
+            f"<td class='border border-gray-700 px-2 py-1'>"
+            f"<a class='text-blue-400' href='/dashboard/zones/edit/{z['id']}'>Edit</a> | "
+            f"<a class='text-red-400' href='/dashboard/zones/delete/{z['id']}'>Delete</a>"
+            f"</td>"
+            f"</tr>"
+        )
+
+    return f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>Zone Editor</title>
+        <script src="https://cdn.tailwindcss.com"></script>
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/fabric.js/5.2.4/fabric.min.js"></script>
+    </head>
+    <body class='bg-gray-900 text-gray-200'>
+        <div class='flex h-screen'>
+            {sidebar}
+            <div class='flex-1 p-10 overflow-auto'>
+                <h2 class='text-3xl font-bold mb-4'>Zone Editor</h2>
+
+                <h3 class='text-xl font-bold mb-2'>Existing Zones</h3>
+                <table class='mb-6 border border-gray-700 text-sm'>
+                    <tr class='bg-gray-800'>
+                        <th class='border border-gray-700 px-2 py-1'>ID</th>
+                        <th class='border border-gray-700 px-2 py-1'>Name</th>
+                        <th class='border border-gray-700 px-2 py-1'>Action</th>
+                        <th class='border border-gray-700 px-2 py-1'>Actions</th>
+                    </tr>
+                    {rows_html}
+                </table>
+
+                <h3 class='text-xl font-bold mt-4 mb-2'>Create New Zone</h3>
+
+                <div class='mb-4'>
+                    <label class='block mb-1'>Zone Name</label>
+                    <input id='zoneName' class='p-2 bg-gray-800 border border-gray-700 rounded w-64'>
+                </div>
+
+                <div class='mb-4'>
+                    <label class='block mb-1'>Action</label>
+                    <select id='zoneAction' class='p-2 bg-gray-800 border border-gray-700 rounded w-64'>
+                        <option value='log'>Log Only</option>
+                        <option value='warn'>Warn Player</option>
+                        <option value='kick'>Kick Player (simulated)</option>
+                        <option value='ban'>Ban Player</option>
+                        <option value='tp'>Teleport Out (simulated)</option>
+                    </select>
+                </div>
+
+                <button onclick='saveZone()' class='px-4 py-2 bg-blue-600 rounded hover:bg-blue-500'>
+                    Save Zone
+                </button>
+
+                <h3 class='text-xl font-bold mt-6 mb-2'>Chernarus Map</h3>
+
+                <canvas id='mapCanvas' width='1024' height='1024' class='border border-gray-700'></canvas>
+
+                <script>
+                    const canvas = new fabric.Canvas('mapCanvas');
+
+                    fabric.Image.fromURL('/static/chernarus.jpg', function(img) {{
+                        img.scaleToWidth(1024);
+                        canvas.setBackgroundImage(img, canvas.renderAll.bind(canvas));
+                    }});
+
+                    let polygonPoints = [];
+
+                    canvas.on('mouse:down', function(opt) {{
+                        const pointer = canvas.getPointer(opt.e);
+                        polygonPoints.push({{ x: pointer.x, z: pointer.y }});
+
+                        const circle = new fabric.Circle({{
+                            radius: 4,
+                            fill: 'red',
+                            left: pointer.x,
+                            top: pointer.y,
+                            selectable: false
+                        }});
+                        canvas.add(circle);
+                    }});
+
+                    function saveZone() {{
+                        const name = document.getElementById('zoneName').value;
+                        const action = document.getElementById('zoneAction').value;
+
+                        if (!name) {{
+                            alert('Zone name is required');
+                            return;
+                        }}
+                        if (polygonPoints.length < 3) {{
+                            alert('You need at least 3 points for a zone.');
+                            return;
+                        }}
+
+                        // Convert canvas coords (0-1024) to world coords (~0-15360)
+                        const worldPoints = polygonPoints.map(p => {{
+                            return {{
+                                x: p.x * {CANVAS_TO_WORLD},
+                                z: p.z * {CANVAS_TO_WORLD}
+                            }};
+                        }});
+
+                        fetch('/dashboard/zones/save', {{
+                            method: 'POST',
+                            headers: {{ 'Content-Type': 'application/json' }},
+                            body: JSON.stringify({{
+                                name: name,
+                                action: action,
+                                points: worldPoints
+                            }})
+                        }}).then(res => {{
+                            if (res.ok) {{
+                                alert('Zone saved!');
+                                window.location.reload();
+                            }} else {{
+                                alert('Failed to save zone');
+                            }}
+                        }});
+                    }}
+                </script>
+
+            </div>
+        </div>
+    </body>
+    </html>
+    """
+
+
+@app.route("/dashboard/zones/save", methods=["POST"])
+def save_zone():
+    if "user" not in session:
+        return "Unauthorized", 403
+
+    data = request.json
+    name = data.get("name", "").strip()
+    action = data.get("action", "log")
+    points = data.get("points", [])
+
+    if not name:
+        return "Name required", 400
+    if not isinstance(points, list) or len(points) < 3:
+        return "At least 3 points required", 400
+
+    points_json = json.dumps(points)
+
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute(
+        "INSERT INTO zones (name, action, points) VALUES (?, ?, ?)",
+        (name, action, points_json),
+    )
+    conn.commit()
+    conn.close()
+
+    return "OK"
+
+
+@app.route("/dashboard/zones/edit/<int:zone_id>", methods=["GET", "POST"])
+def edit_zone(zone_id):
+    if "user" not in session:
+        return redirect("/login")
+
+    zone = get_zone(zone_id)
+    if not zone:
+        return "Zone not found", 404
+
+    if request.method == "POST":
+        name = request.form.get("name", "").strip()
+        action = request.form.get("action", "log")
+        if not name:
+            return "Name required", 400
+        update_zone(zone_id, name, action)
+        return redirect("/dashboard/zones")
+
+    sidebar = render_sidebar("zones")
+
+    return f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>Edit Zone</title>
+        <script src="https://cdn.tailwindcss.com"></script>
+    </head>
+    <body class='bg-gray-900 text-gray-200'>
+        <div class='flex h-screen'>
+            {sidebar}
+            <div class='flex-1 p-10'>
+                <h2 class='text-3xl font-bold mb-4'>Edit Zone #{zone['id']}</h2>
+                <form method='POST' class='space-y-4'>
+                    <div>
+                        <label class='block mb-1'>Zone Name</label>
+                        <input name='name' value='{zone['name']}' class='p-2 bg-gray-800 border border-gray-700 rounded w-64'>
+                    </div>
+                    <div>
+                        <label class='block mb-1'>Action</label>
+                        <select name='action' class='p-2 bg-gray-800 border border-gray-700 rounded w-64'>
+                            <option value='log' {"selected" if zone['action']=="log" else ""}>Log Only</option>
+                            <option value='warn' {"selected" if zone['action']=="warn" else ""}>Warn Player</option>
+                            <option value='kick' {"selected" if zone['action']=="kick" else ""}>Kick Player (simulated)</option>
+                            <option value='ban' {"selected" if zone['action']=="ban" else ""}>Ban Player</option>
+                            <option value='tp' {"selected" if zone['action']=="tp" else ""}>Teleport Out (simulated)</option>
+                        </select>
+                    </div>
+                    <button class='px-4 py-2 bg-blue-600 rounded hover:bg-blue-500'>Save</button>
+                    <a href='/dashboard/zones' class='ml-4 text-gray-400'>Cancel</a>
+                </form>
+            </div>
+        </div>
+    </body>
+    </html>
+    """
+
+
+@app.route("/dashboard/zones/delete/<int:zone_id>")
+def delete_zone_route(zone_id):
+    if "user" not in session:
+        return redirect("/login")
+
+    delete_zone(zone_id)
+    return redirect("/dashboard/zones")
 
 
 @app.route("/logout")
@@ -731,15 +1240,10 @@ def run_flask():
 
 
 if __name__ == "__main__":
-    # Initialize DB BEFORE using NitradoAPI
     init_db()
-
-    # Now safe to create NitradoAPI instance
     nitrado_api = NitradoAPI()
 
-    # Start Flask in background
     flask_thread = threading.Thread(target=run_flask, daemon=True)
     flask_thread.start()
 
-    # Start Discord bot
     bot.run(DISCORD_TOKEN)
