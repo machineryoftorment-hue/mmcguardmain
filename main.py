@@ -149,8 +149,9 @@ async def on_message(message):
 
 @bot.tree.command(name="forcesync", description="Force refresh slash commands")
 async def forcesync(interaction: discord.Interaction):
+    await interaction.response.defer(ephemeral=True)
     await bot.tree.sync()
-    await interaction.response.send_message("🔥 Slash commands fully resynced.", ephemeral=True)
+    await interaction.followup.send("🔥 Slash commands fully resynced.", ephemeral=True)
 
 @bot.tree.command(name="ping", description="Check if MMC Guard is online")
 async def ping(interaction: discord.Interaction):
@@ -158,10 +159,12 @@ async def ping(interaction: discord.Interaction):
 
 @bot.tree.command(name="order", description="View all orders for a username")
 async def order(interaction: discord.Interaction, username: str):
+    await interaction.response.defer(ephemeral=True)
+
     orders = database.get_orders(username.lower())
 
     if not orders:
-        await interaction.response.send_message(
+        await interaction.followup.send(
             f"📭 No orders found for **{username}**.",
             ephemeral=True
         )
@@ -171,14 +174,16 @@ async def order(interaction: discord.Interaction, username: str):
     for i, item in enumerate(orders, start=1):
         msg += f"{i}. {item}\n"
 
-    await interaction.response.send_message(msg, ephemeral=True)
+    await interaction.followup.send(msg, ephemeral=True)
 
 @bot.tree.command(name="addorder", description="Add an order from a message ID")
 async def addorder(interaction: discord.Interaction, message_id: str, username: str):
+    await interaction.response.defer(ephemeral=True)
+
     try:
         msg_id_int = int(message_id)
     except ValueError:
-        await interaction.response.send_message("❌ Invalid message ID.", ephemeral=True)
+        await interaction.followup.send("❌ Invalid message ID.", ephemeral=True)
         return
 
     msg = None
@@ -190,34 +195,36 @@ async def addorder(interaction: discord.Interaction, message_id: str, username: 
             continue
 
     if msg is None:
-        await interaction.response.send_message("❌ Message not found.", ephemeral=True)
+        await interaction.followup.send("❌ Message not found.", ephemeral=True)
         return
 
     content = msg.content.strip()
     if not content:
-        await interaction.response.send_message("❌ Message has no text content.", ephemeral=True)
+        await interaction.followup.send("❌ Message has no text content.", ephemeral=True)
         return
 
     database.add_order(username.lower(), content)
 
-    await interaction.response.send_message(
+    await interaction.followup.send(
         f"✅ Added order for **{username}**:\n`{content}`",
         ephemeral=True
     )
 
 @bot.tree.command(name="orders", description="View all stored orders")
 async def orders(interaction: discord.Interaction):
+    await interaction.response.defer(ephemeral=True)
+
     rows = database.get_all_orders()
 
     if not rows:
-        await interaction.response.send_message("📭 No orders stored.", ephemeral=True)
+        await interaction.followup.send("📭 No orders stored.", ephemeral=True)
         return
 
     msg = "📦 **All Orders:**\n\n"
     for row in rows:
         msg += f"**{row['username']}**: {row['content']}\n"
 
-    await interaction.response.send_message(msg, ephemeral=True)
+    await interaction.followup.send(msg, ephemeral=True)
 
 # Sync slash commands
 @bot.event
