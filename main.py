@@ -8,7 +8,7 @@ import discord
 from discord.ext import commands
 from discord import app_commands
 
-from flask import Flask, redirect, request, session, url_for
+from flask import Flask, redirect, request, session
 
 import requests
 
@@ -26,7 +26,9 @@ DISCORD_CLIENT_ID = os.environ.get("DISCORD_CLIENT_ID")
 DISCORD_CLIENT_SECRET = os.environ.get("DISCORD_CLIENT_SECRET")
 OAUTH_REDIRECT_URI = os.environ.get("OAUTH_REDIRECT_URI")
 
-GUILD_ID = int(os.environ.get("GUILD_ID", "0"))  # your Discord server ID
+# Your Discord server ID (GUILD_ID)
+GUILD_ID = int(os.environ.get("GUILD_ID", "1404279040893911103"))
+
 ADMIN_ROLE_ID = int(os.environ.get("ADMIN_ROLE_ID", "0"))
 
 CONNECTION_CHANNEL_ID = int(os.environ.get("CONNECTION_CHANNEL_ID", "0"))
@@ -99,7 +101,7 @@ def init_db():
         """
     )
 
-    # Orders (for your existing system)
+    # Orders
     cur.execute(
         """
         CREATE TABLE IF NOT EXISTS orders (
@@ -217,10 +219,10 @@ class NitradoAPI:
         r = requests.post(url, headers=self._headers(), timeout=10)
         return r.status_code == 200
 
-    # The following are placeholders; you can adjust to real Nitrado endpoints
     def get_players(self):
         if not self.token or not self.service_id:
             return []
+        # Placeholder endpoint – adjust to your real Nitrado API
         url = f"{self.base_url}/services/{self.service_id}/gameservers/games/players"
         r = requests.get(url, headers=self._headers(), timeout=10)
         if r.status_code != 200:
@@ -232,7 +234,6 @@ class NitradoAPI:
             return []
 
     def ban_player(self, name: str):
-        # Placeholder – adjust to real API
         logger.info(f"[NitradoAPI] Ban requested for {name}")
         return True
 
@@ -249,7 +250,7 @@ class NitradoAPI:
         return True
 
 
-nitrado_api = NitradoAPI()
+nitrado_api: NitradoAPI | None = None
 
 # -----------------------------
 # Discord bot setup
@@ -273,23 +274,32 @@ async def on_ready():
         logger.exception("Failed to sync commands: %s", e)
 
 
+def user_is_admin(member: discord.Member) -> bool:
+    return any(r.id == ADMIN_ROLE_ID for r in member.roles)
+
+
 # -----------------------------
 # Slash commands
 # -----------------------------
 @tree.command(name="activate", description="Activate Nitrado integration with token and service ID")
 @app_commands.describe(token="Your Nitrado long-life token", service_id="Your Nitrado service ID")
 async def activate(interaction: discord.Interaction, token: str, service_id: str):
-    if not any(r.id == ADMIN_ROLE_ID for r in interaction.user.roles):
+    if not user_is_admin(interaction.user):
         await interaction.response.send_message("You don't have permission to use this.", ephemeral=True)
         return
 
     set_settings(token, service_id)
-    nitrado_api.refresh_settings()
+    if nitrado_api:
+        nitrado_api.refresh_settings()
     await interaction.response.send_message("Nitrado token and service ID saved.", ephemeral=True)
 
 
 @tree.command(name="serverstatus", description="Get Nitrado server status")
 async def serverstatus(interaction: discord.Interaction):
+    if not nitrado_api:
+        await interaction.response.send_message("Nitrado API not initialized.", ephemeral=True)
+        return
+
     data = nitrado_api.get_status()
     if not data:
         await interaction.response.send_message("Could not fetch server status. Is /activate set?", ephemeral=True)
@@ -300,8 +310,12 @@ async def serverstatus(interaction: discord.Interaction):
 
 @tree.command(name="restartserver", description="Restart the Nitrado server")
 async def restartserver(interaction: discord.Interaction):
-    if not any(r.id == ADMIN_ROLE_ID for r in interaction.user.roles):
+    if not user_is_admin(interaction.user):
         await interaction.response.send_message("You don't have permission to use this.", ephemeral=True)
+        return
+
+    if not nitrado_api:
+        await interaction.response.send_message("Nitrado API not initialized.", ephemeral=True)
         return
 
     ok = nitrado_api.restart_server()
@@ -313,13 +327,17 @@ async def restartserver(interaction: discord.Interaction):
 
 @tree.command(name="players", description="List online players from Nitrado")
 async def players(interaction: discord.Interaction):
-    players = nitrado_api.get_players()
-    if not players:
+    if not nitrado_api:
+        await interaction.response.send_message("Nitrado API not initialized.", ephemeral=True)
+        return
+
+    players_list = nitrado_api.get_players()
+    if not players_list:
         await interaction.response.send_message("No players or failed to fetch.", ephemeral=True)
         return
 
     lines = []
-    for p in players:
+    for p in players_list:
         name = p.get("name", "Unknown")
         lines.append(f"- {name}")
     msg = "\n".join(lines)
@@ -328,8 +346,12 @@ async def players(interaction: discord.Interaction):
 
 @tree.command(name="ban", description="Ban a player via Nitrado")
 async def ban(interaction: discord.Interaction, player_name: str):
-    if not any(r.id == ADMIN_ROLE_ID for r in interaction.user.roles):
+    if not user_is_admin(interaction.user):
         await interaction.response.send_message("You don't have permission to use this.", ephemeral=True)
+        return
+
+    if not nitrado_api:
+        await interaction.response.send_message("Nitrado API not initialized.", ephemeral=True)
         return
 
     ok = nitrado_api.ban_player(player_name)
@@ -341,8 +363,12 @@ async def ban(interaction: discord.Interaction, player_name: str):
 
 @tree.command(name="unban", description="Unban a player via Nitrado")
 async def unban(interaction: discord.Interaction, player_name: str):
-    if not any(r.id == ADMIN_ROLE_ID for r in interaction.user.roles):
+    if not user_is_admin(interaction.user):
         await interaction.response.send_message("You don't have permission to use this.", ephemeral=True)
+        return
+
+    if not nitrado_api:
+        await interaction.response.send_message("Nitrado API not initialized.", ephemeral=True)
         return
 
     ok = nitrado_api.unban_player(player_name)
@@ -354,8 +380,12 @@ async def unban(interaction: discord.Interaction, player_name: str):
 
 @tree.command(name="whitelist_add", description="Add a player to whitelist")
 async def whitelist_add(interaction: discord.Interaction, player_name: str):
-    if not any(r.id == ADMIN_ROLE_ID for r in interaction.user.roles):
+    if not user_is_admin(interaction.user):
         await interaction.response.send_message("You don't have permission to use this.", ephemeral=True)
+        return
+
+    if not nitrado_api:
+        await interaction.response.send_message("Nitrado API not initialized.", ephemeral=True)
         return
 
     ok = nitrado_api.whitelist_add(player_name)
@@ -367,8 +397,12 @@ async def whitelist_add(interaction: discord.Interaction, player_name: str):
 
 @tree.command(name="whitelist_remove", description="Remove a player from whitelist")
 async def whitelist_remove(interaction: discord.Interaction, player_name: str):
-    if not any(r.id == ADMIN_ROLE_ID for r in interaction.user.roles):
+    if not user_is_admin(interaction.user):
         await interaction.response.send_message("You don't have permission to use this.", ephemeral=True)
+        return
+
+    if not nitrado_api:
+        await interaction.response.send_message("Nitrado API not initialized.", ephemeral=True)
         return
 
     ok = nitrado_api.whitelist_remove(player_name)
@@ -397,30 +431,22 @@ async def orders_cmd(interaction: discord.Interaction):
     await interaction.response.send_message("\n".join(lines), ephemeral=True)
 
 
-# You can add /online, /playerinfo, /explosives, /forcesync similarly,
-# wired into your DB and Nitrado API as needed.
-
-
 # -----------------------------
 # Feed parsing via on_message
 # -----------------------------
 @bot.event
 async def on_message(message: discord.Message):
-    # Don't respond to self
     if message.author == bot.user:
         return
 
     # Connection feed
     if message.channel.id == CONNECTION_CHANNEL_ID:
-        # Example: parse join/leave logs if you want to store them
         logger.info(f"[CONNECTION FEED] {message.content}")
 
     # Explosive feed
     if message.channel.id == EXPLOSIVE_CHANNEL_ID:
-        # Very rough example: "Player X placed M67 at [123,456,789]"
         content = message.content
         try:
-            # You can improve this parsing to match your actual log format
             if "placed" in content and "at" in content:
                 parts = content.split("placed")
                 player_name = parts[0].strip()
@@ -501,9 +527,6 @@ def oauth_callback():
     )
     user_json = user_res.json()
 
-    # Optional: check guild membership via bot instead of OAuth scope
-    # Here we just trust that if they can log in, you’ll check admin in Discord.
-
     session["user"] = user_json
     return redirect("/dashboard")
 
@@ -516,7 +539,6 @@ def dashboard():
     return """
     <h1>MMC Guard Admin Dashboard</h1>
     <ul>
-        <li><a href='/dashboard/players'>Players</a></li>
         <li><a href='/dashboard/explosives'>Explosives</a></li>
         <li><a href='/dashboard/kills'>Kills</a></li>
         <li><a href='/dashboard/orders'>Orders</a></li>
@@ -586,6 +608,9 @@ def dashboard_server():
     if "user" not in session:
         return redirect("/login")
 
+    if not nitrado_api:
+        return "<h1>Server Status</h1><p>Nitrado API not initialized.</p><a href='/dashboard'>Back</a>"
+
     data = nitrado_api.get_status()
     if not data:
         return "<h1>Server Status</h1><p>Could not fetch status. Check /activate.</p><a href='/dashboard'>Back</a>"
@@ -608,7 +633,15 @@ def run_flask():
 
 
 if __name__ == "__main__":
+    # Initialize DB BEFORE using NitradoAPI
     init_db()
+
+    # Now safe to create NitradoAPI instance
+    nitrado_api = NitradoAPI()
+
+    # Start Flask in background
     flask_thread = threading.Thread(target=run_flask, daemon=True)
     flask_thread.start()
+
+    # Start Discord bot
     bot.run(DISCORD_TOKEN)
