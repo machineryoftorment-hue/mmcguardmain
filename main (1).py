@@ -7,6 +7,24 @@ import time
 import random
 from dotenv import load_dotenv
 
+# -----------------------------
+# KEEP-ALIVE WEB SERVER (Render)
+# -----------------------------
+from flask import Flask
+import threading
+
+app = Flask(__name__)
+
+@app.route('/')
+def home():
+    return "MMC Guard is alive!"
+
+def run_keepalive():
+    app.run(host='0.0.0.0', port=8080)
+
+threading.Thread(target=run_keepalive).start()
+# -----------------------------
+
 # Load environment variables
 load_dotenv()
 TOKEN = os.getenv("DISCORD_TOKEN")
