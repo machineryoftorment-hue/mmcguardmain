@@ -8,6 +8,10 @@
     canvas {
         image-rendering: crisp-edges;
         image-rendering: pixelated;
+        cursor: grab;
+    }
+    canvas:active {
+        cursor: grabbing;
     }
 </style>
 {% endblock %}
@@ -24,6 +28,8 @@
             <div class="flex gap-2 text-xs">
                 <span class="px-2 py-1 rounded bg-gray-800 text-gray-300">Click to add points</span>
                 <span class="px-2 py-1 rounded bg-gray-800 text-gray-300">Right‑click to undo</span>
+                <span class="px-2 py-1 rounded bg-gray-800 text-gray-300">Scroll to zoom</span>
+                <span class="px-2 py-1 rounded bg-gray-800 text-gray-300">Drag to pan</span>
             </div>
         </div>
 
@@ -139,71 +145,153 @@
 
 {% block body_extra %}
 <script>
-// Simple polygon editor on top of a static map image
+// =========================
+// MAP + CANVAS SETUP
+// =========================
 const img = document.getElementById('chernarus-map');
 const canvas = document.getElementById('zone-canvas');
 const ctx = canvas.getContext('2d');
 
+// Zoom + pan state
+let scale = 1;
+let originX = 0;
+let originY = 0;
+let isDragging = false;
+let dragStart = { x: 0, y: 0 };
+
+// New zone drawing state
 const points = [];
 const pointCountEl = document.getElementById('point-count');
 const lastPointEl = document.getElementById('last-point');
 const pointsJsonEl = document.getElementById('points_json');
-const clearBtn = document.getElementById('clear-points');
-const finishBtn = document.getElementById('finish-polygon');
 
-function resizeCanvasToImage() {
-    if (!img.complete || img.naturalWidth === 0) return;
+// Saved zones from Flask
+const savedZones = JSON.parse(`{{ zones|tojson }}`);
+
+// =========================
+// CANVAS RESIZE
+// =========================
+function resizeCanvas() {
     canvas.width = img.naturalWidth;
     canvas.height = img.naturalHeight;
     draw();
 }
 
+// =========================
+// DRAW EVERYTHING
+// =========================
 function draw() {
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+    ctx.save();
+    ctx.setTransform(scale, 0, 0, scale, originX, originY);
 
-    if (points.length === 0) return;
+    ctx.drawImage(img, 0, 0);
 
-    ctx.strokeStyle = '#38bdf8';
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.moveTo(points[0].x, points[0].y);
-    for (let i = 1; i < points.length; i++) {
-        ctx.lineTo(points[i].x, points[i].y);
-    }
-    ctx.stroke();
+    savedZones.forEach((zone, index) => {
+        const pts = JSON.parse(zone.points);
+        shadePolygon(pts, index);
+    });
 
-    ctx.fillStyle = '#22c55e';
-    for (const p of points) {
-        ctx.beginPath();
-        ctx.arc(p.x, p.y, 4, 0, Math.PI * 2);
-        ctx.fill();
-    }
-}
-
-function updateInfo() {
-    pointCountEl.textContent = points.length.toString();
     if (points.length > 0) {
-        const p = points[points.length - 1];
-        lastPointEl.textContent = `${Math.round(p.x)}, ${Math.round(p.y)}`;
-    } else {
-        lastPointEl.textContent = '-';
+        ctx.strokeStyle = '#38bdf8';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(points[0].x, points[0].y);
+        for (let i = 1; i < points.length; i++) {
+            ctx.lineTo(points[i].x, points[i].y);
+        }
+        ctx.stroke();
+
+        ctx.fillStyle = '#22c55e';
+        points.forEach(p => {
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, 4, 0, Math.PI * 2);
+            ctx.fill();
+        });
     }
+
+    ctx.restore();
 }
 
-canvas.addEventListener('click', (e) => {
-    const rect = canvas.getBoundingClientRect();
-    const scaleX = canvas.width / rect.width;
-    const scaleY = canvas.height / rect.height;
+// =========================
+// SHADE A POLYGON
+// =========================
+function shadePolygon(pts, index) {
+    const colors = [
+        "rgba(56,189,248,0.35)",
+        "rgba(34,197,94,0.35)",
+        "rgba(239,68,68,0.35)",
+        "rgba(234,179,8,0.35)"
+    ];
+    const color = colors[index % colors.length];
 
-    const x = (e.clientX - rect.left) * scaleX;
-    const y = (e.clientY - rect.top) * scaleY;
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.moveTo(pts[0][0], pts[0][1]);
+    for (let i = 1; i < pts.length; i++) {
+        ctx.lineTo(pts[i][0], pts[i][1]);
+    }
+    ctx.closePath();
+    ctx.fill();
+}
+
+// =========================
+// ZOOM HANDLER
+// =========================
+canvas.addEventListener('wheel', (e) => {
+    e.preventDefault();
+    const zoomFactor = 1.1;
+    const mouseX = e.offsetX;
+    const mouseY = e.offsetY;
+
+    const direction = e.deltaY < 0 ? 1 : -1;
+    const zoom = Math.pow(zoomFactor, direction);
+
+    const wx = (mouseX - originX) / scale;
+    const wy = (mouseY - originY) / scale;
+
+    scale *= zoom;
+    originX = mouseX - wx * scale;
+    originY = mouseY - wy * scale;
+
+    draw();
+});
+
+// =========================
+// PAN HANDLER
+// =========================
+canvas.addEventListener('mousedown', (e) => {
+    isDragging = true;
+    dragStart.x = e.clientX - originX;
+    dragStart.y = e.clientY - originY;
+});
+
+canvas.addEventListener('mousemove', (e) => {
+    if (isDragging) {
+        originX = e.clientX - dragStart.x;
+        originY = e.clientY - dragStart.y;
+        draw();
+    }
+});
+
+canvas.addEventListener('mouseup', () => isDragging = false);
+canvas.addEventListener('mouseleave', () => isDragging = false);
+
+// =========================
+// ADD POINTS FOR NEW ZONE
+// =========================
+canvas.addEventListener('click', (e) => {
+    if (isDragging) return;
+
+    const rect = canvas.getBoundingClientRect();
+    const x = (e.clientX - rect.left - originX) / scale;
+    const y = (e.clientY - rect.top - originY) / scale;
 
     points.push({ x, y });
     updateInfo();
     draw();
 });
 
+// Right-click undo
 canvas.addEventListener('contextmenu', (e) => {
     e.preventDefault();
     points.pop();
@@ -211,26 +299,49 @@ canvas.addEventListener('contextmenu', (e) => {
     draw();
 });
 
-clearBtn.addEventListener('click', () => {
+// =========================
+// UPDATE INFO PANEL
+// =========================
+function updateInfo() {
+    pointCountEl.textContent = points.length;
+    if (points.length > 0) {
+        const p = points[points.length - 1];
+        lastPointEl.textContent = `${Math.round(p.x)}, ${Math.round(p.y)}`;
+    } else {
+        lastPointEl.textContent = "-";
+    }
+}
+
+// =========================
+// CLEAR POINTS
+// =========================
+document.getElementById('clear-points').addEventListener('click', () => {
     points.length = 0;
     updateInfo();
+    pointsJsonEl.value = "";
     draw();
-    pointsJsonEl.value = '';
 });
 
-finishBtn.addEventListener('click', () => {
+// =========================
+// FINISH POLYGON
+// =========================
+document.getElementById('finish-polygon').addEventListener('click', () => {
     if (points.length < 3) {
-        alert('You need at least 3 points to form a zone.');
+        alert("You need at least 3 points.");
         return;
     }
-    const simplePoints = points.map(p => [Math.round(p.x), Math.round(p.y)]);
-    pointsJsonEl.value = JSON.stringify(simplePoints);
+
+    const simple = points.map(p => [Math.round(p.x), Math.round(p.y)]);
+    pointsJsonEl.value = JSON.stringify(simple);
+
+    shadePolygon(simple, savedZones.length);
+    draw();
 });
 
-if (img.complete) {
-    resizeCanvasToImage();
-} else {
-    img.onload = resizeCanvasToImage;
-}
+// =========================
+// INIT
+// =========================
+if (img.complete) resizeCanvas();
+else img.onload = resizeCanvas;
 </script>
 {% endblock %}
