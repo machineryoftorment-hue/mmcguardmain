@@ -3,7 +3,7 @@ import sqlite3
 import threading
 from typing import Dict, Any, Optional
 
-from flask import Flask, request, jsonify, render_template_string, redirect, url_for
+from flask import Flask, request, jsonify, render_template, redirect, url_for
 import discord
 from discord.ext import commands
 
@@ -49,7 +49,7 @@ def init_db() -> None:
     conn = get_db()
     cur = conn.cursor()
 
-    # Zones table (polygon in world coords)
+    # Zones table
     cur.execute(
         """
         CREATE TABLE IF NOT EXISTS zones (
@@ -61,7 +61,7 @@ def init_db() -> None:
         """
     )
 
-    # Bot settings table (single row id=1)
+    # Bot settings table
     cur.execute(
         """
         CREATE TABLE IF NOT EXISTS bot_settings (
@@ -178,6 +178,8 @@ def delete_zone(zone_id: int) -> None:
     cur.execute("DELETE FROM zones WHERE id = ?", (zone_id,))
     conn.commit()
     conn.close()
+
+
 # =========================
 # DISCORD CHANNEL ACCESS
 # =========================
@@ -214,220 +216,13 @@ async def on_ready():
 
 
 # =========================
-# FLASK ROUTES TEMPLATES
+# FLASK ROUTES
 # =========================
 
-INDEX_TEMPLATE = """
-<!doctype html>
-<html>
-<head>
-    <title>MMCGuard Dashboard</title>
-</head>
-<body>
-    <h1>MMCGuard Dashboard</h1>
-    <ul>
-        <li><a href="{{ url_for('zones_dashboard') }}">Zones</a></li>
-        <li><a href="{{ url_for('discord_settings') }}">Discord Settings</a></li>
-    </ul>
-</body>
-</html>
-"""
-
-ZONES_TEMPLATE = """
-<!doctype html>
-<html>
-<head>
-    <title>Zones</title>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/fabric.js/5.3.0/fabric.min.js"></script>
-    <style>
-        body { font-family: sans-serif; }
-        #canvas-container { position: relative; }
-        #zoneCanvas { border: 1px solid #444; }
-        .point { width: 6px; height: 6px; background: red; position: absolute; border-radius: 50%; }
-    </style>
-</head>
-<body>
-    <h1>Zone Editor</h1>
-    <a href="{{ url_for('index') }}">Back</a>
-
-    <div id="canvas-container">
-        <canvas id="zoneCanvas" width="1024" height="1024"></canvas>
-    </div>
-
-    <form method="post" action="{{ url_for('zones_dashboard') }}">
-        <p>
-            <label>Zone Name:</label>
-            <input type="text" name="zone_name" required>
-        </p>
-        <p>
-            <label>Action:</label>
-            <select name="zone_action">
-                <option value="log">Log only</option>
-                <option value="warn">Warn</option>
-                <option value="kick">Kick</option>
-                <option value="ban">Ban</option>
-                <option value="tp">Teleport</option>
-            </select>
-        </p>
-        <input type="hidden" id="pointsField" name="points_json">
-        <button type="submit">Save Zone</button>
-    </form>
-
-    <h2>Existing Zones</h2>
-    <table border="1" cellpadding="4">
-        <tr>
-            <th>ID</th>
-            <th>Name</th>
-            <th>Action</th>
-            <th>Points</th>
-            <th>Delete</th>
-        </tr>
-        {% for z in zones %}
-        <tr>
-            <td>{{ z.id }}</td>
-            <td>{{ z.name }}</td>
-            <td>{{ z.action }}</td>
-            <td>{{ z.points }}</td>
-            <td>
-                <form method="post" action="{{ url_for('delete_zone_route', zone_id=z.id) }}">
-                    <button type="submit">Delete</button>
-                </form>
-            </td>
-        </tr>
-        {% endfor %}
-    </table>
-
-    <script>
-        const canvas = new fabric.Canvas('zoneCanvas', {
-            selection: false
-        });
-
-        fabric.Image.fromURL('/static/chernarus.jpg', function(img) {
-            img.set({ selectable: false });
-            canvas.setBackgroundImage(img, canvas.renderAll.bind(canvas), {
-                scaleX: canvas.width / img.width,
-                scaleY: canvas.height / img.height
-            });
-        });
-
-        let points = [];
-
-        canvas.on('mouse:down', function(opt) {
-            const pointer = canvas.getPointer(opt.e);
-            const circle = new fabric.Circle({
-                left: pointer.x,
-                top: pointer.y,
-                radius: 3,
-                fill: 'red',
-                selectable: false,
-                originX: 'center',
-                originY: 'center'
-            });
-            canvas.add(circle);
-            points.push({ x: pointer.x, y: pointer.y });
-            document.getElementById('pointsField').value = JSON.stringify(points);
-        });
-    </script>
-</body>
-</html>
-"""
-
-DISCORD_SETTINGS_TEMPLATE = """
-<!doctype html>
-<html>
-<head>
-    <title>Discord Settings</title>
-</head>
-<body>
-    <h1>Discord Settings</h1>
-    <a href="{{ url_for('index') }}">Back</a>
-
-    <form method="post" action="{{ url_for('discord_settings') }}">
-        <p>
-            <label>Kill Feed Channel:</label>
-            <select name="kill_feed_channel">
-                <option value="0">Disabled</option>
-                {% for ch in channels %}
-                <option value="{{ ch.id }}" {% if ch.id == settings.kill_feed_channel %}selected{% endif %}>
-                    {{ ch.name }} ({{ ch.id }})
-                </option>
-                {% endfor %}
-            </select>
-        </p>
-
-        <p>
-            <label>Explosive Feed Channel:</label>
-            <select name="explosive_feed_channel">
-                <option value="0">Disabled</option>
-                {% for ch in channels %}
-                <option value="{{ ch.id }}" {% if ch.id == settings.explosive_feed_channel %}selected{% endif %}>
-                    {{ ch.name }} ({{ ch.id }})
-                </option>
-                {% endfor %}
-            </select>
-        </p>
-
-        <p>
-            <label>Connection Feed Channel:</label>
-            <select name="connection_feed_channel">
-                <option value="0">Disabled</option>
-                {% for ch in channels %}
-                <option value="{{ ch.id }}" {% if ch.id == settings.connection_feed_channel %}selected{% endif %}>
-                    {{ ch.name }} ({{ ch.id }})
-                </option>
-                {% endfor %}
-            </select>
-        </p>
-
-        <p>
-            <label>Zone Alert Channel:</label>
-            <select name="zone_alert_channel">
-                <option value="0">Disabled</option>
-                {% for ch in channels %}
-                <option value="{{ ch.id }}" {% if ch.id == settings.zone_alert_channel %}selected{% endif %}>
-                    {{ ch.name }} ({{ ch.id }})
-                </option>
-                {% endfor %}
-            </select>
-        </p>
-
-        <p>
-            <label>General Log Channel:</label>
-            <select name="general_log_channel">
-                <option value="0">Disabled</option>
-                {% for ch in channels %}
-                <option value="{{ ch.id }}" {% if ch.id == settings.general_log_channel %}selected{% endif %}>
-                    {{ ch.name }} ({{ ch.id }})
-                </option>
-                {% endfor %}
-            </select>
-        </p>
-
-        <p>
-            <label>Admin Alert Channel:</label>
-            <select name="admin_alert_channel">
-                <option value="0">Disabled</option>
-                {% for ch in channels %}
-                <option value="{{ ch.id }}" {% if ch.id == settings.admin_alert_channel %}selected{% endif %}>
-                    {{ ch.name }} ({{ ch.id }})
-                </option>
-                {% endfor %}
-            </select>
-        </p>
-
-        <button type="submit">Save Settings</button>
-    </form>
-</body>
-</html>
-"""
 @app.route("/")
 def index():
-    return render_template_string("index.html")
+    return render_template("index.html")
 
-
-# =========================
-# ZONES DASHBOARD
-# =========================
 
 @app.route("/dashboard/zones", methods=["GET", "POST"])
 def zones_dashboard():
@@ -442,7 +237,7 @@ def zones_dashboard():
         return redirect(url_for("zones_dashboard"))
 
     zones = get_all_zones()
-    return render_template_string(ZONES_TEMPLATE, zones=zones)
+    return render_template("zones.html", zones=zones)
 
 
 @app.route("/dashboard/zones/delete/<int:zone_id>", methods=["POST"])
@@ -450,10 +245,6 @@ def delete_zone_route(zone_id: int):
     delete_zone(zone_id)
     return redirect(url_for("zones_dashboard"))
 
-
-# =========================
-# DISCORD SETTINGS DASHBOARD
-# =========================
 
 def get_guild_channels() -> list[discord.TextChannel]:
     guild = bot.get_guild(GUILD_ID)
@@ -481,15 +272,11 @@ def discord_settings():
 
     settings = get_bot_settings()
     channels = get_guild_channels()
-    return render_template_string(
-        DISCORD_SETTINGS_TEMPLATE,
-        settings=settings,
-        channels=channels,
-    )
+    return render_template("discord_settings.html", settings=settings, channels=channels)
 
 
 # =========================
-# API ENDPOINTS (OPTIONAL)
+# API ENDPOINTS
 # =========================
 
 @app.route("/api/zones", methods=["GET"])
