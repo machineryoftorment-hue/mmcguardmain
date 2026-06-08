@@ -1,11 +1,14 @@
 import os
-import sqlite3
+import json
 import threading
 from typing import Dict, Any, Optional
 
 from flask import Flask, request, jsonify, render_template, redirect, url_for
 import discord
 from discord.ext import commands
+
+import psycopg2
+import psycopg2.extras
 
 # =========================
 # CONFIG
@@ -14,8 +17,6 @@ from discord.ext import commands
 TOKEN = os.environ.get("DISCORD_BOT_TOKEN", "")
 GUILD_ID = 1404279040893911103
 ADMIN_ROLE_ID = 1419520911471542413
-
-DB_PATH = "mmcguard.db"
 
 # =========================
 # DISCORD BOT SETUP
@@ -36,51 +37,47 @@ app = Flask(__name__, static_folder="static", static_url_path="/static")
 
 
 # =========================
-# DATABASE HELPERS
+# POSTGRESQL DATABASE
 # =========================
 
-def get_db() -> sqlite3.Connection:
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
+def get_db():
+    url = os.getenv("DATABASE_URL")
+    conn = psycopg2.connect(url, cursor_factory=psycopg2.extras.RealDictCursor)
     return conn
 
 
-def init_db() -> None:
+@app.route("/initdb")
+def initdb():
     conn = get_db()
     cur = conn.cursor()
 
     # Zones table
-    cur.execute(
-        """
+    cur.execute("""
         CREATE TABLE IF NOT EXISTS zones (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id SERIAL PRIMARY KEY,
             name TEXT NOT NULL,
             action TEXT NOT NULL,
-            points TEXT NOT NULL
-        )
-        """
-    )
+            points JSON NOT NULL
+        );
+    """)
 
     # Bot settings table
-    cur.execute(
-        """
+    cur.execute("""
         CREATE TABLE IF NOT EXISTS bot_settings (
-            id INTEGER PRIMARY KEY CHECK (id = 1),
-            kill_feed_channel INTEGER,
-            explosive_feed_channel INTEGER,
-            connection_feed_channel INTEGER,
-            zone_alert_channel INTEGER,
-            general_log_channel INTEGER,
-            admin_alert_channel INTEGER
-        )
-        """
-    )
+            id INTEGER PRIMARY KEY,
+            kill_feed_channel BIGINT,
+            explosive_feed_channel BIGINT,
+            connection_feed_channel BIGINT,
+            zone_alert_channel BIGINT,
+            general_log_channel BIGINT,
+            admin_alert_channel BIGINT
+        );
+    """)
 
-    # Ensure row exists
+    # Ensure settings row exists
     cur.execute("SELECT id FROM bot_settings WHERE id = 1")
     if cur.fetchone() is None:
-        cur.execute(
-            """
+        cur.execute("""
             INSERT INTO bot_settings (
                 id,
                 kill_feed_channel,
@@ -90,18 +87,25 @@ def init_db() -> None:
                 general_log_channel,
                 admin_alert_channel
             ) VALUES (1, 0, 0, 0, 0, 0, 0)
-            """
-        )
+        """)
 
     conn.commit()
+    cur.close()
     conn.close()
 
+    return "Database initialized!"
+
+
+# =========================
+# BOT SETTINGS HELPERS
+# =========================
 
 def get_bot_settings() -> Dict[str, int]:
     conn = get_db()
     cur = conn.cursor()
     cur.execute("SELECT * FROM bot_settings WHERE id = 1")
     row = cur.fetchone()
+    cur.close()
     conn.close()
 
     if not row:
@@ -127,56 +131,61 @@ def get_bot_settings() -> Dict[str, int]:
 def update_bot_settings(data: Dict[str, Any]) -> None:
     conn = get_db()
     cur = conn.cursor()
-    cur.execute(
-        """
+    cur.execute("""
         UPDATE bot_settings
         SET
-            kill_feed_channel = ?,
-            explosive_feed_channel = ?,
-            connection_feed_channel = ?,
-            zone_alert_channel = ?,
-            general_log_channel = ?,
-            admin_alert_channel = ?
+            kill_feed_channel = %s,
+            explosive_feed_channel = %s,
+            connection_feed_channel = %s,
+            zone_alert_channel = %s,
+            general_log_channel = %s,
+            admin_alert_channel = %s
         WHERE id = 1
-        """,
-        (
-            int(data.get("kill_feed_channel", 0) or 0),
-            int(data.get("explosive_feed_channel", 0) or 0),
-            int(data.get("connection_feed_channel", 0) or 0),
-            int(data.get("zone_alert_channel", 0) or 0),
-            int(data.get("general_log_channel", 0) or 0),
-            int(data.get("admin_alert_channel", 0) or 0),
-        ),
-    )
+    """, (
+        int(data.get("kill_feed_channel", 0) or 0),
+        int(data.get("explosive_feed_channel", 0) or 0),
+        int(data.get("connection_feed_channel", 0) or 0),
+        int(data.get("zone_alert_channel", 0) or 0),
+        int(data.get("general_log_channel", 0) or 0),
+        int(data.get("admin_alert_channel", 0) or 0),
+    ))
     conn.commit()
+    cur.close()
     conn.close()
 
 
-def get_all_zones() -> list[sqlite3.Row]:
+# =========================
+# ZONE HELPERS
+# =========================
+
+def get_all_zones():
     conn = get_db()
     cur = conn.cursor()
     cur.execute("SELECT * FROM zones ORDER BY id ASC")
     rows = cur.fetchall()
+    cur.close()
     conn.close()
     return rows
 
 
-def add_zone(name: str, action: str, points_json: str) -> None:
+def add_zone(name: str, action: str, points_json: str):
     conn = get_db()
     cur = conn.cursor()
     cur.execute(
-        "INSERT INTO zones (name, action, points) VALUES (?, ?, ?)",
-        (name, action, points_json),
+        "INSERT INTO zones (name, action, points) VALUES (%s, %s, %s)",
+        (name, action, points_json)
     )
     conn.commit()
+    cur.close()
     conn.close()
 
 
-def delete_zone(zone_id: int) -> None:
+def delete_zone(zone_id: int):
     conn = get_db()
     cur = conn.cursor()
-    cur.execute("DELETE FROM zones WHERE id = ?", (zone_id,))
+    cur.execute("DELETE FROM zones WHERE id = %s", (zone_id,))
     conn.commit()
+    cur.close()
     conn.close()
 
 
@@ -246,13 +255,6 @@ def delete_zone_route(zone_id: int):
     return redirect(url_for("zones_dashboard"))
 
 
-def get_guild_channels() -> list[discord.TextChannel]:
-    guild = bot.get_guild(GUILD_ID)
-    if not guild:
-        return []
-    return [ch for ch in guild.channels if isinstance(ch, discord.TextChannel)]
-
-
 @app.route("/dashboard/discord-settings", methods=["GET", "POST"])
 def discord_settings():
     global CHANNELS_CACHE
@@ -271,7 +273,9 @@ def discord_settings():
         return redirect(url_for("discord_settings"))
 
     settings = get_bot_settings()
-    channels = get_guild_channels()
+    guild = bot.get_guild(GUILD_ID)
+    channels = [ch for ch in guild.channels if isinstance(ch, discord.TextChannel)] if guild else []
+
     return render_template("discord_settings.html", settings=settings, channels=channels)
 
 
@@ -282,17 +286,15 @@ def discord_settings():
 @app.route("/api/zones", methods=["GET"])
 def api_get_zones():
     zones = get_all_zones()
-    return jsonify(
-        [
-            {
-                "id": z["id"],
-                "name": z["name"],
-                "action": z["action"],
-                "points": z["points"],
-            }
-            for z in zones
-        ]
-    )
+    return jsonify([
+        {
+            "id": z["id"],
+            "name": z["name"],
+            "action": z["action"],
+            "points": json.loads(z["points"]),
+        }
+        for z in zones
+    ])
 
 
 # =========================
@@ -308,9 +310,6 @@ def run_bot():
 
 
 if __name__ == "__main__":
-    init_db()
-
     flask_thread = threading.Thread(target=run_flask, daemon=True)
     flask_thread.start()
-
     run_bot()
