@@ -2,4 +2,5 @@ discord.py==2.3.2
 Flask
 requests
 python-dotenv
+psycopg2-binary
 
