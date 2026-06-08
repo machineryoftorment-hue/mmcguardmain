@@ -1,2 +1,42 @@
-<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Discord Settings</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+
+<div class="container">
+    <h1>Discord Settings</h1>
+    <a href="{{ url_for('index') }}">← Back</a>
+
+    <form method="post" action="{{ url_for('discord_settings') }}">
+
+        {% macro dropdown(label, name, selected) %}
+        <p>
+            <label>{{ label }}:</label>
+            <select name="{{ name }}">
+                <option value="0">Disabled</option>
+                {% for ch in channels %}
+                <option value="{{ ch.id }}" {% if ch.id == selected %}selected{% endif %}>
+                    {{ ch.name }} ({{ ch.id }})
+                </option>
+                {% endfor %}
+            </select>
+        </p>
+        {% endmacro %}
+
+        {{ dropdown("Kill Feed Channel", "kill_feed_channel", settings.kill_feed_channel) }}
+        {{ dropdown("Explosive Feed Channel", "explosive_feed_channel", settings.explosive_feed_channel) }}
+        {{ dropdown("Connection Feed Channel", "connection_feed_channel", settings.connection_feed_channel) }}
+        {{ dropdown("Zone Alert Channel", "zone_alert_channel", settings.zone_alert_channel) }}
+        {{ dropdown("General Log Channel", "general_log_channel", settings.general_log_channel) }}
+        {{ dropdown("Admin Alert Channel", "admin_alert_channel", settings.admin_alert_channel) }}
+
+        <button type="submit">Save Settings</button>
+    </form>
+</div>
+
+</body>
+</html>
 
