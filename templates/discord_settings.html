@@ -1,41 +1,140 @@
-<!DOCTYPE html>
-<html>
-<head>
-    <title>Discord Settings</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
-</head>
-<body>
+{% extends "base.html" %}
 
-<div class="container">
-    <h1>Discord Settings</h1>
-    <a href="{{ url_for('index') }}">← Back</a>
+{% block title %}Discord Settings{% endblock %}
+{% block page_title %}Discord Settings{% endblock %}
 
-    <form method="post" action="{{ url_for('discord_settings') }}">
+{% block content %}
+<div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
 
-        {% macro dropdown(label, name, selected) %}
-        <p>
-            <label>{{ label }}:</label>
-            <select name="{{ name }}">
-                <option value="0">Disabled</option>
-                {% for ch in channels %}
-                <option value="{{ ch.id }}" {% if ch.id == selected %}selected{% endif %}>
-                    {{ ch.name }} ({{ ch.id }})
-                </option>
-                {% endfor %}
-            </select>
+    <!-- Settings form -->
+    <div class="bg-mmc-card rounded-xl shadow-lg border border-gray-800 p-5">
+        <h3 class="text-lg font-semibold text-white mb-3 flex items-center gap-2">
+            ⚙️ Channel Mapping
+        </h3>
+        <p class="text-xs text-gray-400 mb-4">
+            Select which Discord channels MMC Guard should use for each type of message.
         </p>
-        {% endmacro %}
 
-        {{ dropdown("Kill Feed Channel", "kill_feed_channel", settings.kill_feed_channel) }}
-        {{ dropdown("Explosive Feed Channel", "explosive_feed_channel", settings.explosive_feed_channel) }}
-        {{ dropdown("Connection Feed Channel", "connection_feed_channel", settings.connection_feed_channel) }}
-        {{ dropdown("Zone Alert Channel", "zone_alert_channel", settings.zone_alert_channel) }}
-        {{ dropdown("General Log Channel", "general_log_channel", settings.general_log_channel) }}
-        {{ dropdown("Admin Alert Channel", "admin_alert_channel", settings.admin_alert_channel) }}
+        <form method="POST" action="{{ url_for('discord_settings') }}" class="space-y-4">
 
-        <button type="submit">Save Settings</button>
-    </form>
+            {% macro channel_select(label, name, current_id) %}
+                <div>
+                    <label class="block text-xs font-semibold text-gray-300 mb-1">{{ label }}</label>
+                    <select name="{{ name }}"
+                            class="w-full px-3 py-2 rounded bg-gray-900 border border-gray-700 text-sm text-gray-100 focus:outline-none focus:ring-1 focus:ring-mmc-accent">
+                        <option value="0">Disabled</option>
+                        {% for ch in channels %}
+                            <option value="{{ ch.id }}"
+                                    {% if current_id == ch.id %}selected{% endif %}>
+                                #{{ ch.name }} ({{ ch.id }})
+                            </option>
+                        {% endfor %}
+                    </select>
+                </div>
+            {% endmacro %}
+
+            {{ channel_select("Kill Feed Channel", "kill_feed_channel", settings.kill_feed_channel) }}
+            {{ channel_select("Explosive Feed Channel", "explosive_feed_channel", settings.explosive_feed_channel) }}
+            {{ channel_select("Connection Feed Channel", "connection_feed_channel", settings.connection_feed_channel) }}
+            {{ channel_select("Zone Alert Channel", "zone_alert_channel", settings.zone_alert_channel) }}
+            {{ channel_select("General Log Channel", "general_log_channel", settings.general_log_channel) }}
+            {{ channel_select("Admin Alert Channel", "admin_alert_channel", settings.admin_alert_channel) }}
+
+            <button type="submit"
+                    class="w-full py-2 rounded bg-mmc-accent hover:bg-sky-500 text-sm font-semibold text-gray-900 mt-2">
+                Save Settings
+            </button>
+        </form>
+    </div>
+
+    <!-- Info / status -->
+    <div class="space-y-4">
+
+        <!-- Current mapping -->
+        <div class="bg-mmc-card rounded-xl shadow-lg border border-gray-800 p-4">
+            <h3 class="text-sm font-semibold text-white mb-2 flex items-center gap-2">
+                📡 Current Mapping
+            </h3>
+
+            <ul class="text-xs text-gray-300 space-y-1">
+
+                <li>Kill Feed:
+                    <span class="font-mono text-mmc-accent">
+                        {% if settings.kill_feed_channel %}
+                            #{{ (channels|selectattr('id', 'equalto', settings.kill_feed_channel)|list)[0].name
+                                if channels|selectattr('id', 'equalto', settings.kill_feed_channel)|list
+                                else settings.kill_feed_channel }}
+                        {% else %}Disabled{% endif %}
+                    </span>
+                </li>
+
+                <li>Explosive Feed:
+                    <span class="font-mono text-mmc-accent">
+                        {% if settings.explosive_feed_channel %}
+                            #{{ (channels|selectattr('id', 'equalto', settings.explosive_feed_channel)|list)[0].name
+                                if channels|selectattr('id', 'equalto', settings.explosive_feed_channel)|list
+                                else settings.explosive_feed_channel }}
+                        {% else %}Disabled{% endif %}
+                    </span>
+                </li>
+
+                <li>Connection Feed:
+                    <span class="font-mono text-mmc-accent">
+                        {% if settings.connection_feed_channel %}
+                            #{{ (channels|selectattr('id', 'equalto', settings.connection_feed_channel)|list)[0].name
+                                if channels|selectattr('id', 'equalto', settings.connection_feed_channel)|list
+                                else settings.connection_feed_channel }}
+                        {% else %}Disabled{% endif %}
+                    </span>
+                </li>
+
+                <li>Zone Alerts:
+                    <span class="font-mono text-mmc-accent">
+                        {% if settings.zone_alert_channel %}
+                            #{{ (channels|selectattr('id', 'equalto', settings.zone_alert_channel)|list)[0].name
+                                if channels|selectattr('id', 'equalto', settings.zone_alert_channel)|list
+                                else settings.zone_alert_channel }}
+                        {% else %}Disabled{% endif %}
+                    </span>
+                </li>
+
+                <li>General Log:
+                    <span class="font-mono text-mmc-accent">
+                        {% if settings.general_log_channel %}
+                            #{{ (channels|selectattr('id', 'equalto', settings.general_log_channel)|list)[0].name
+                                if channels|selectattr('id', 'equalto', settings.general_log_channel)|list
+                                else settings.general_log_channel }}
+                        {% else %}Disabled{% endif %}
+                    </span>
+                </li>
+
+                <li>Admin Alerts:
+                    <span class="font-mono text-mmc-accent">
+                        {% if settings.admin_alert_channel %}
+                            #{{ (channels|selectattr('id', 'equalto', settings.admin_alert_channel)|list)[0].name
+                                if channels|selectattr('id', 'equalto', settings.admin_alert_channel)|list
+                                else settings.admin_alert_channel }}
+                        {% else %}Disabled{% endif %}
+                    </span>
+                </li>
+
+            </ul>
+        </div>
+
+        <!-- Tips -->
+        <div class="bg-mmc-card rounded-xl shadow-lg border border-gray-800 p-4">
+            <h3 class="text-sm font-semibold text-white mb-2 flex items-center gap-2">
+                💡 Tips
+            </h3>
+
+            <ul class="text-xs text-gray-400 space-y-1 list-disc list-inside">
+                <li>Use a dedicated text channel for kill feed to avoid clutter.</li>
+                <li>Keep admin alerts in a private staff‑only channel.</li>
+                <li>Set General Log to a channel where you don’t mind spam.</li>
+            </ul>
+        </div>
+
+    </div>
+
 </div>
-
-</body>
-</html>
+{% endblock %}
