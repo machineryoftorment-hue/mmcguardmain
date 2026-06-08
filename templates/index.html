@@ -1,20 +1,13 @@
+{% extends "base.html" %}
 
-<!DOCTYPE html>
-<html>
-<head>
-    <title>MMCGuard Dashboard</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
-</head>
-<body>
+{% block title %}Dashboard Overview{% endblock %}
+{% block page_title %}Dashboard Overview{% endblock %}
 
-<div class="container">
-    <h1>MMCGuard Dashboard</h1>
-
-    <ul>
-        <li><a href="{{ url_for('zones_dashboard') }}">Zone Editor</a></li>
-        <li><a href="{{ url_for('discord_settings') }}">Discord Settings</a></li>
-    </ul>
+{% block content %}
+<div class="bg-mmc-card p-6 rounded-xl border border-gray-800 shadow-lg">
+    <h3 class="text-xl font-semibold mb-2">Welcome to MMC Guard</h3>
+    <p class="text-gray-400 text-sm">
+        Use the sidebar to manage zones, Discord settings, and server tools.
+    </p>
 </div>
-
-</body>
-</html>
+{% endblock %}
