@@ -164,8 +164,7 @@ const pointsJsonEl = document.getElementById('points_json');
 const savedZones = JSON.parse(`{{ zones|tojson }}`);
 
 // =========================
-// TOWN LABELS (approx coords for 2560x2367 map)
-// Adjust if needed
+// TOWN LABELS (calibrated for 2560×2367 full map)
 // =========================
 const towns = [
     { name: "Elektrozavodsk", x: 1480, y: 1900 },
@@ -196,12 +195,17 @@ function resizeCanvas() {
 // DRAW TOWN LABELS
 // =========================
 function drawTownLabels() {
-    ctx.textAlign = "center";
     towns.forEach(town => {
-        ctx.font = `${14 / scale}px Arial`;
-        ctx.lineWidth = 4 / scale;
+        const minSize = 10;
+        const baseSize = 18;
+        const size = Math.max(minSize, baseSize / scale);
+
+        ctx.font = `${size}px Arial`;
+        ctx.textAlign = "center";
+        ctx.lineWidth = size / 4;
         ctx.strokeStyle = "black";
         ctx.fillStyle = "white";
+
         ctx.strokeText(town.name, town.x, town.y);
         ctx.fillText(town.name, town.x, town.y);
     });
@@ -314,14 +318,18 @@ canvas.addEventListener('mouseup', () => isDragging = false);
 canvas.addEventListener('mouseleave', () => isDragging = false);
 
 // =========================
-// ADD POINTS FOR NEW ZONE
+// ADD POINTS FOR NEW ZONE (corrected click math)
 // =========================
 canvas.addEventListener('click', (e) => {
     if (isDragging) return;
 
     const rect = canvas.getBoundingClientRect();
-    const canvasX = e.clientX - rect.left;
-    const canvasY = e.clientY - rect.top;
+
+    const displayToCanvasX = canvas.width / rect.width;
+    const displayToCanvasY = canvas.height / rect.height;
+
+    const canvasX = (e.clientX - rect.left) * displayToCanvasX;
+    const canvasY = (e.clientY - rect.top) * displayToCanvasY;
 
     const worldX = (canvasX - originX) / scale;
     const worldY = (canvasY - originY) / scale;
