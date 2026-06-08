@@ -422,7 +422,7 @@ DISCORD_SETTINGS_TEMPLATE = """
 """
 @app.route("/")
 def index():
-    return render_template_string(INDEX_TEMPLATE)
+    return render_template_string("index.html")
 
 
 # =========================
