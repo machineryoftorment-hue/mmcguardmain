@@ -249,6 +249,57 @@ async def online(i):
     lines=[f"- `{p.get('name','?')}` (ping {p.get('ping','?')})" for p in players]
     await i.followup.send(embed=make_embed("Online","\n".join(lines)))
 
+
+@tree.command(name="debug_endpoints", description="Test all Nitrado player-action endpoints")
+@app_commands.guilds(discord.Object(id=GUILD_ID))
+async def debug_endpoints(interaction: discord.Interaction):
+    if not isinstance(interaction.user, discord.Member) or not user_is_admin(interaction.user):
+        return await interaction.response.send_message("No permission", ephemeral=True)
+
+    await interaction.response.defer(ephemeral=True)
+
+    sid = nitrado.sid
+    token = NITRADO_TOKEN
+    headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+
+    endpoints = {
+        "ban": [
+            f"/gameservers/players/ban",
+            f"/gameservers/command/players/ban",
+            f"/gameservers/games/players/ban"
+        ],
+        "kick": [
+            f"/gameservers/players/kick",
+            f"/gameservers/command/players/kick",
+            f"/gameservers/games/players/kick"
+        ],
+        "unban": [
+            f"/gameservers/players/unban",
+            f"/gameservers/command/players/unban",
+            f"/gameservers/games/players/unban"
+        ],
+        "whitelist_add": [
+            f"/gameservers/players/whitelist/add",
+            f"/gameservers/command/players/whitelist/add",
+            f"/gameservers/games/players/whitelist/add"
+        ]
+    }
+
+    results = []
+
+    for action, paths in endpoints.items():
+        for p in paths:
+            url = f"https://api.nitrado.net/services/{sid}{p}"
+            try:
+                r = requests.post(url, headers=headers, json={"name": "TestName"})
+                results.append(f"{action} → `{p}` → {r.status_code}")
+            except Exception as e:
+                results.append(f"{action} → `{p}` → ERROR: {str(e)}")
+
+    embed = make_embed("Endpoint Debug Results", "\n".join(results), discord.Color.orange())
+    await interaction.followup.send(embed=embed, ephemeral=True)
+
+
 @app.route("/")
 def index():return render_template("index.html")
 
