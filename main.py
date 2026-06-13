@@ -824,6 +824,21 @@ def run_flask():
 
 def run_bot():
     bot.run(TOKEN)
+# -------------------------------------------------
+# TEMPORARY: Test Nitrado restart endpoint
+# -------------------------------------------------
+print("Testing restart endpoint...")
+try:
+    r = requests.post(
+        f"https://api.nitrado.net/services/{nitrado_api.server_id}/gameservers/games/commands/server/restart",
+        headers={"Authorization": f"Bearer {NITRADO_TOKEN}"}
+    )
+    print("Restart test status:", r.status_code)
+    print("Restart test response:", r.text)
+except Exception as e:
+    print("Error testing restart endpoint:", e)
+
+
 
 
 if __name__ == "__main__":
