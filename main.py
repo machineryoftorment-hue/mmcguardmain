@@ -36,6 +36,8 @@ GUILD_ID = 1404279040893911103
 ADMIN_ROLE_ID = 1419520911471542413
 
 DEFAULT_NITRADO_SERVER_ID = int(os.environ.get("NITRADO_SERVER_ID", "17649304"))
+
+# ⭐ US REGION (Miami server)
 NITRADO_API_BASE = "https://api-us.nitrado.net"
 
 bot_start_time = datetime.utcnow()
@@ -191,8 +193,6 @@ def update_bot_settings(data: Dict[str, Any]) -> None:
     conn.commit()
     cur.close()
     conn.close()
-
-
 # =========================
 # NITRADO SETTINGS HELPERS (SERVER ID)
 # =========================
@@ -284,6 +284,7 @@ def reload_channel_settings() -> Dict[str, Optional[discord.TextChannel]]:
 
 
 CHANNELS_CACHE: Dict[str, Optional[discord.TextChannel]] = {}
+
 
 # =========================
 # NITRADO API WRAPPER (ENV TOKEN ONLY)
@@ -386,13 +387,9 @@ class NitradoAPI:
 
 
 nitrado_api = NitradoAPI()
-
 # =========================
 # DISCORD EVENTS & COMMANDS
 # =========================
-
-WIPED_COMMANDS = False  # one-time wipe flag
-
 
 def user_is_admin(member: discord.Member) -> bool:
     return any(role.id == ADMIN_ROLE_ID for role in member.roles)
@@ -400,31 +397,17 @@ def user_is_admin(member: discord.Member) -> bool:
 
 @bot.event
 async def on_ready():
-    global CHANNELS_CACHE, WIPED_COMMANDS
+    global CHANNELS_CACHE
 
     CHANNELS_CACHE = reload_channel_settings()
     guild = bot.get_guild(GUILD_ID)
 
     if guild:
-        if not WIPED_COMMANDS:
-            try:
-                logger.info("Wiping old slash commands from guild...")
-                await tree.sync(guild=guild)
-                cmds = await tree.fetch_commands(guild=guild)
-                for cmd in cmds:
-                    await cmd.delete()
-                logger.info("Old commands deleted. Resyncing new commands...")
-                await tree.sync(guild=guild)
-                WIPED_COMMANDS = True
-                logger.info("New commands synced.")
-            except Exception as e:
-                logger.exception(f"Failed to wipe commands: {e}")
-        else:
-            try:
-                await tree.sync(guild=guild)
-                logger.info(f"Synced commands to guild {guild.name} ({guild.id})")
-            except Exception as e:
-                logger.exception(f"Failed to sync commands: {e}")
+        try:
+            await tree.sync(guild=guild)
+            logger.info(f"Commands synced safely to guild {guild.name} ({guild.id})")
+        except Exception as e:
+            logger.exception(f"Failed to sync commands: {e}")
 
     logger.info(f"Logged in as {bot.user} (guild {GUILD_ID})")
 
@@ -444,7 +427,7 @@ async def checktoken(interaction: discord.Interaction):
 
     info = nitrado_api.get_server_info()
     if info is None:
-        await interaction.response.send_message("❌ Token is set, but server info could not be retrieved. Check token, server ID, and Nitrado scopes.")
+        await interaction.response.send_message("❌ Token is set, but server info could not be retrieved. Check token, server ID, region, and Nitrado scopes.")
     else:
         await interaction.response.send_message("✅ Token is set and Nitrado API responded successfully.")
 
@@ -490,7 +473,7 @@ async def pingserver(interaction: discord.Interaction):
 
     info = nitrado_api.get_server_info()
     if info is None:
-        await interaction.response.send_message("❌ Nitrado API did not respond successfully. Check token, server ID, and scopes.")
+        await interaction.response.send_message("❌ Nitrado API did not respond successfully. Check token, server ID, region, and scopes.")
     else:
         await interaction.response.send_message("✅ Nitrado API is reachable and responded successfully.")
 
@@ -508,7 +491,7 @@ async def status(interaction: discord.Interaction):
     players = nitrado_api.get_online_players()
 
     if info is None:
-        await interaction.response.send_message("❌ Could not retrieve server info. Check token and server ID.")
+        await interaction.response.send_message("❌ Could not retrieve server info. Check token, server ID, and region.")
         return
 
     data = info.get("data", {})
@@ -551,7 +534,7 @@ async def serverinfo(interaction: discord.Interaction):
 
     info = nitrado_api.get_server_info()
     if info is None:
-        await interaction.response.send_message("❌ Could not retrieve server info. Check token and server ID.")
+        await interaction.response.send_message("❌ Could not retrieve server info. Check token, server ID, and region.")
         return
 
     data = info.get("data", {})
@@ -583,7 +566,7 @@ async def online(interaction: discord.Interaction):
 
     players = nitrado_api.get_online_players()
     if players is None:
-        await interaction.response.send_message("❌ Could not retrieve online players. Check token and server.")
+        await interaction.response.send_message("❌ Could not retrieve online players. Check token, server ID, and region.")
         return
 
     if not players:
@@ -613,7 +596,7 @@ async def restartserver(interaction: discord.Interaction):
     if ok:
         await interaction.response.send_message("🔄 Server restart command sent to Nitrado.")
     else:
-        await interaction.response.send_message("❌ Failed to send restart command. Check token and server.")
+        await interaction.response.send_message("❌ Failed to send restart command. Check token, server ID, and region.")
 
 
 @tree.command(name="stopserver", description="Stop the DayZ server (Nitrado)")
@@ -627,7 +610,7 @@ async def stopserver(interaction: discord.Interaction):
     if ok:
         await interaction.response.send_message("🛑 Server stop command sent to Nitrado.")
     else:
-        await interaction.response.send_message("❌ Failed to send stop command. Check token and server.")
+        await interaction.response.send_message("❌ Failed to send stop command. Check token, server ID, and region.")
 
 
 @tree.command(name="startserver", description="Start the DayZ server (Nitrado)")
@@ -641,7 +624,7 @@ async def startserver(interaction: discord.Interaction):
     if ok:
         await interaction.response.send_message("▶️ Server start command sent to Nitrado.")
     else:
-        await interaction.response.send_message("❌ Failed to send start command. Check token and server.")
+        await interaction.response.send_message("❌ Failed to send start command. Check token, server ID, and region.")
 
 
 # ---- Soft / hard restart ----
@@ -649,7 +632,7 @@ async def startserver(interaction: discord.Interaction):
 @tree.command(name="restartsoft", description="Soft restart the DayZ server (Nitrado)")
 @app_commands.guilds(discord.Object(id=GUILD_ID))
 async def restartsoft(interaction: discord.Interaction):
-    await restartserver.callback(interaction)  # reuse logic
+    await restartserver.callback(interaction)
 
 
 @tree.command(name="restarthard", description="Hard restart (stop, wait, start) the DayZ server")
@@ -674,109 +657,6 @@ async def restarthard(interaction: discord.Interaction):
         return
 
     await interaction.followup.send("✅ Hard restart completed: server stopped and started again.")
-
-
-# ---- Player management ----
-
-@tree.command(name="ban", description="Ban a player by name from the DayZ server")
-@app_commands.describe(player="Player name to ban")
-@app_commands.guilds(discord.Object(id=GUILD_ID))
-async def ban(interaction: discord.Interaction, player: str):
-    if not isinstance(interaction.user, discord.Member) or not user_is_admin(interaction.user):
-        await interaction.response.send_message("You do not have permission to use this command.", ephemeral=True)
-        return
-
-    ok = nitrado_api.ban_player(player)
-    if ok:
-        await interaction.response.send_message(f"🚫 Player `{player}` has been banned.")
-    else:
-        await interaction.response.send_message(f"❌ Failed to ban `{player}`. Check token and server.")
-
-
-@tree.command(name="unban", description="Unban a player by name from the DayZ server")
-@app_commands.describe(player="Player name to unban")
-@app_commands.guilds(discord.Object(id=GUILD_ID))
-async def unban(interaction: discord.Interaction, player: str):
-    if not isinstance(interaction.user, discord.Member) or not user_is_admin(interaction.user):
-        await interaction.response.send_message("You do not have permission to use this command.", ephemeral=True)
-        return
-
-    ok = nitrado_api.unban_player(player)
-    if ok:
-        await interaction.response.send_message(f"✅ Player `{player}` has been unbanned.")
-    else:
-        await interaction.response.send_message(f"❌ Failed to unban `{player}`. Check token and server.")
-
-
-@tree.command(name="kick", description="Kick a player by name from the DayZ server")
-@app_commands.describe(player="Player name to kick")
-@app_commands.guilds(discord.Object(id=GUILD_ID))
-async def kick(interaction: discord.Interaction, player: str):
-    if not isinstance(interaction.user, discord.Member) or not user_is_admin(interaction.user):
-        await interaction.response.send_message("You do not have permission to use this command.", ephemeral=True)
-        return
-
-    ok = nitrado_api.kick_player(player)
-    if ok:
-        await interaction.response.send_message(f"👢 Player `{player}` has been kicked.")
-    else:
-        await interaction.response.send_message(f"❌ Failed to kick `{player}`. Check token and server.")
-
-
-@tree.command(name="whitelistadd", description="Add a player to the whitelist by name")
-@app_commands.describe(player="Player name to whitelist")
-@app_commands.guilds(discord.Object(id=GUILD_ID))
-async def whitelistadd(interaction: discord.Interaction, player: str):
-    if not isinstance(interaction.user, discord.Member) or not user_is_admin(interaction.user):
-        await interaction.response.send_message("You do not have permission to use this command.", ephemeral=True)
-        return
-
-    ok = nitrado_api.whitelist_add(player)
-    if ok:
-        await interaction.response.send_message(f"✅ Player `{player}` has been added to the whitelist.")
-    else:
-        await interaction.response.send_message(f"❌ Failed to whitelist `{player}`. Check token and server.")
-
-
-@tree.command(name="whitelistremove", description="Remove a player from the whitelist by name")
-@app_commands.describe(player="Player name to remove from whitelist")
-@app_commands.guilds(discord.Object(id=GUILD_ID))
-async def whitelistremove(interaction: discord.Interaction, player: str):
-    if not isinstance(interaction.user, discord.Member) or not user_is_admin(interaction.user):
-        await interaction.response.send_message("You do not have permission to use this command.", ephemeral=True)
-        return
-
-    ok = nitrado_api.whitelist_remove(player)
-    if ok:
-        await interaction.response.send_message(f"✅ Player `{player}` has been removed from the whitelist.")
-    else:
-        await interaction.response.send_message(f"❌ Failed to remove `{player}` from whitelist. Check token and server.")
-
-
-# ---- Optional manual wipe command ----
-
-@tree.command(name="wipecommands", description="Admin-only: wipe all slash commands for this bot in this guild")
-@app_commands.guilds(discord.Object(id=GUILD_ID))
-async def wipecommands(interaction: discord.Interaction):
-    if not isinstance(interaction.user, discord.Member) or not user_is_admin(interaction.user):
-        await interaction.response.send_message("You do not have permission to use this command.", ephemeral=True)
-        return
-
-    guild = interaction.guild
-    if not guild:
-        await interaction.response.send_message("This command must be used in a server.", ephemeral=True)
-        return
-
-    try:
-        cmds = await tree.fetch_commands(guild=guild)
-        for cmd in cmds:
-            await cmd.delete()
-        await tree.sync(guild=guild)
-        await interaction.response.send_message("🧹 All slash commands for this bot have been wiped from this guild.")
-    except Exception as e:
-        await interaction.response.send_message(f"❌ Failed to wipe commands: {e}")
-
-
 # =========================
 # FLASK ROUTES
 # =========================
@@ -832,8 +712,6 @@ def discord_settings():
     return render_template("discord_settings.html", settings=settings, channels=channels)
 
 
-# ---- Dashboard status / API endpoints ----
-
 @app.route("/dashboard/status")
 def dashboard_status():
     info = nitrado_api.get_server_info()
@@ -871,6 +749,8 @@ def dashboard_status():
         bot_uptime=uptime_str,
     )
 
+
+# ---- API endpoints ----
 
 @app.route("/api/serverinfo", methods=["GET"])
 def api_serverinfo():
