@@ -1,6 +1,9 @@
 import os
 import json
 import threading
+import logging
+import time
+from datetime import datetime, timedelta
 from typing import Dict, Any, Optional, List
 
 from flask import Flask, request, jsonify, render_template, redirect, url_for
@@ -13,15 +16,29 @@ import psycopg2.extras
 import requests
 
 # =========================
+# LOGGING
+# =========================
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="[%(asctime)s] [%(levelname)s] %(name)s: %(message)s",
+)
+logger = logging.getLogger("mmcguard")
+
+# =========================
 # CONFIG
 # =========================
 
 TOKEN = os.environ.get("DISCORD_BOT_TOKEN", "")
+NITRADO_TOKEN = os.environ.get("NITRADO_TOKEN", None)
+
 GUILD_ID = 1404279040893911103
 ADMIN_ROLE_ID = 1419520911471542413
 
-NITRADO_SERVER_ID = 17649304
+DEFAULT_NITRADO_SERVER_ID = int(os.environ.get("NITRADO_SERVER_ID", "17649304"))
 NITRADO_API_BASE = "https://api-us.nitrado.net"
+
+bot_start_time = datetime.utcnow()
 
 # =========================
 # DISCORD BOT SETUP
@@ -79,11 +96,12 @@ def initdb():
         );
     """)
 
-    # Nitrado settings table
+    # Nitrado settings table (server_id only; token is env-based)
     cur.execute("""
         CREATE TABLE IF NOT EXISTS nitrado_settings (
             id INTEGER PRIMARY KEY,
-            api_token TEXT
+            api_token TEXT,
+            server_id BIGINT
         );
     """)
 
@@ -106,9 +124,9 @@ def initdb():
     cur.execute("SELECT id FROM nitrado_settings WHERE id = 1")
     if cur.fetchone() is None:
         cur.execute("""
-            INSERT INTO nitrado_settings (id, api_token)
-            VALUES (1, NULL)
-        """)
+            INSERT INTO nitrado_settings (id, api_token, server_id)
+            VALUES (1, NULL, %s)
+        """, (DEFAULT_NITRADO_SERVER_ID,))
 
     conn.commit()
     cur.close()
@@ -176,32 +194,33 @@ def update_bot_settings(data: Dict[str, Any]) -> None:
 
 
 # =========================
-# NITRADO TOKEN HELPERS
+# NITRADO SETTINGS HELPERS (SERVER ID)
 # =========================
 
-def get_nitrado_token() -> Optional[str]:
+def get_nitrado_server_id() -> int:
     conn = get_db()
     cur = conn.cursor()
-    cur.execute("SELECT api_token FROM nitrado_settings WHERE id = 1")
+    cur.execute("SELECT server_id FROM nitrado_settings WHERE id = 1")
     row = cur.fetchone()
     cur.close()
     conn.close()
-    if not row:
-        return None
-    return row["api_token"]
+    if not row or not row.get("server_id"):
+        return DEFAULT_NITRADO_SERVER_ID
+    return int(row["server_id"])
 
 
-def set_nitrado_token(token: str) -> None:
+def set_nitrado_server_id(server_id: int) -> None:
     conn = get_db()
     cur = conn.cursor()
     cur.execute("""
         UPDATE nitrado_settings
-        SET api_token = %s
+        SET server_id = %s
         WHERE id = 1
-    """, (token,))
+    """, (server_id,))
     conn.commit()
     cur.close()
     conn.close()
+    logger.info(f"Nitrado server ID updated to {server_id}")
 
 
 # =========================
@@ -267,17 +286,20 @@ def reload_channel_settings() -> Dict[str, Optional[discord.TextChannel]]:
 CHANNELS_CACHE: Dict[str, Optional[discord.TextChannel]] = {}
 
 # =========================
-# NITRADO API WRAPPER (DayZ PS4)
+# NITRADO API WRAPPER (ENV TOKEN ONLY)
 # =========================
 
 class NitradoAPI:
     def __init__(self):
         self.base_url = NITRADO_API_BASE
-        self.server_id = NITRADO_SERVER_ID
+
+    @property
+    def server_id(self) -> int:
+        return get_nitrado_server_id()
 
     @property
     def token(self) -> Optional[str]:
-        return get_nitrado_token()
+        return NITRADO_TOKEN  # ENV ONLY
 
     @property
     def headers(self) -> Dict[str, str]:
@@ -294,24 +316,32 @@ class NitradoAPI:
 
     def _post(self, path: str, payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         if not self.token:
+            logger.warning("NitradoAPI._post called with no token set")
             return None
         try:
+            logger.info(f"POST {path} payload={payload}")
             resp = requests.post(self._url(path), headers=self.headers, json=payload, timeout=10)
             if resp.status_code != 200:
+                logger.error(f"Nitrado POST {path} failed: {resp.status_code} {resp.text}")
                 return None
             return resp.json()
-        except Exception:
+        except Exception as e:
+            logger.exception(f"Nitrado POST {path} exception: {e}")
             return None
 
     def _get(self, path: str) -> Optional[Dict[str, Any]]:
         if not self.token:
+            logger.warning("NitradoAPI._get called with no token set")
             return None
         try:
+            logger.info(f"GET {path}")
             resp = requests.get(self._url(path), headers=self.headers, timeout=10)
             if resp.status_code != 200:
+                logger.error(f"Nitrado GET {path} failed: {resp.status_code} {resp.text}")
                 return None
             return resp.json()
-        except Exception:
+        except Exception as e:
+            logger.exception(f"Nitrado GET {path} exception: {e}")
             return None
 
     # ---- Server info / players ----
@@ -329,43 +359,30 @@ class NitradoAPI:
     # ---- Server control ----
 
     def restart_server(self) -> bool:
-        res = self._post("/gameservers/games/commands/server/restart", {})
-        return res is not None
+        return self._post("/gameservers/games/commands/server/restart", {}) is not None
 
     def stop_server(self) -> bool:
-        res = self._post("/gameservers/games/commands/server/stop", {})
-        return res is not None
+        return self._post("/gameservers/games/commands/server/stop", {}) is not None
 
     def start_server(self) -> bool:
-        res = self._post("/gameservers/games/commands/server/start", {})
-        return res is not None
+        return self._post("/gameservers/games/commands/server/start", {}) is not None
 
-    # ---- Player management (name-based) ----
+    # ---- Player management ----
 
     def ban_player(self, name: str) -> bool:
-        payload = {"player": name}
-        res = self._post("/gameservers/games/commands/players/ban", payload)
-        return res is not None
+        return self._post("/gameservers/games/commands/players/ban", {"player": name}) is not None
 
     def unban_player(self, name: str) -> bool:
-        payload = {"player": name}
-        res = self._post("/gameservers/games/commands/players/unban", payload)
-        return res is not None
+        return self._post("/gameservers/games/commands/players/unban", {"player": name}) is not None
 
     def kick_player(self, name: str) -> bool:
-        payload = {"player": name}
-        res = self._post("/gameservers/games/commands/players/kick", payload)
-        return res is not None
+        return self._post("/gameservers/games/commands/players/kick", {"player": name}) is not None
 
     def whitelist_add(self, name: str) -> bool:
-        payload = {"player": name}
-        res = self._post("/gameservers/games/commands/players/whitelist/add", payload)
-        return res is not None
+        return self._post("/gameservers/games/commands/players/whitelist/add", {"player": name}) is not None
 
     def whitelist_remove(self, name: str) -> bool:
-        payload = {"player": name}
-        res = self._post("/gameservers/games/commands/players/whitelist/remove", payload)
-        return res is not None
+        return self._post("/gameservers/games/commands/players/whitelist/remove", {"player": name}) is not None
 
 
 nitrado_api = NitradoAPI()
@@ -389,50 +406,30 @@ async def on_ready():
     guild = bot.get_guild(GUILD_ID)
 
     if guild:
-        # ONE-TIME: wipe all old commands from this application in this guild
         if not WIPED_COMMANDS:
             try:
-                print("Wiping old slash commands from guild...")
-                # sync first to ensure we have current remote state
+                logger.info("Wiping old slash commands from guild...")
                 await tree.sync(guild=guild)
                 cmds = await tree.fetch_commands(guild=guild)
                 for cmd in cmds:
                     await cmd.delete()
-                print("Old commands deleted. Resyncing new commands...")
+                logger.info("Old commands deleted. Resyncing new commands...")
                 await tree.sync(guild=guild)
                 WIPED_COMMANDS = True
-                print("New commands synced.")
+                logger.info("New commands synced.")
             except Exception as e:
-                print(f"Failed to wipe commands: {e}")
+                logger.exception(f"Failed to wipe commands: {e}")
         else:
             try:
                 await tree.sync(guild=guild)
-                print(f"Synced commands to guild {guild.name} ({guild.id})")
+                logger.info(f"Synced commands to guild {guild.name} ({guild.id})")
             except Exception as e:
-                print(f"Failed to sync commands: {e}")
+                logger.exception(f"Failed to sync commands: {e}")
 
-    print(f"Logged in as {bot.user} (guild {GUILD_ID})")
-
-
-# ---- Core token command ----
-
-@tree.command(name="activate", description="Save or update the Nitrado API token")
-@app_commands.describe(token="Your Nitrado long-life API token")
-@app_commands.guilds(discord.Object(id=GUILD_ID))
-async def activate(interaction: discord.Interaction, token: str):
-    if not isinstance(interaction.user, discord.Member):
-        await interaction.response.send_message("This command must be used in a server.", ephemeral=True)
-        return
-
-    if not user_is_admin(interaction.user):
-        await interaction.response.send_message("You do not have permission to use this command.", ephemeral=True)
-        return
-
-    set_nitrado_token(token)
-    await interaction.response.send_message("✅ Nitrado API token has been saved.")
+    logger.info(f"Logged in as {bot.user} (guild {GUILD_ID})")
 
 
-# ---- Utility: check token ----
+# ---- Token check command ----
 
 @tree.command(name="checktoken", description="Check if the Nitrado API token is set and valid")
 @app_commands.guilds(discord.Object(id=GUILD_ID))
@@ -442,14 +439,105 @@ async def checktoken(interaction: discord.Interaction):
         return
 
     if not nitrado_api.token:
-        await interaction.response.send_message("❌ No Nitrado token is set. Use /activate first.")
+        await interaction.response.send_message("❌ No Nitrado token is set in environment variables (`NITRADO_TOKEN`).")
         return
 
     info = nitrado_api.get_server_info()
     if info is None:
-        await interaction.response.send_message("❌ Token is set, but server info could not be retrieved.")
+        await interaction.response.send_message("❌ Token is set, but server info could not be retrieved. Check token, server ID, and Nitrado scopes.")
     else:
         await interaction.response.send_message("✅ Token is set and Nitrado API responded successfully.")
+
+
+# ---- Dummy activate command (env mode) ----
+
+@tree.command(name="activate", description="(Env mode) Inform users that token is stored in environment variables")
+@app_commands.guilds(discord.Object(id=GUILD_ID))
+async def activate(interaction: discord.Interaction):
+    await interaction.response.send_message(
+        "🔐 This bot now uses **environment variables only** for the Nitrado token.\n"
+        "Set `NITRADO_TOKEN` (and optionally `NITRADO_SERVER_ID`) in your Render environment settings.",
+        ephemeral=True
+    )
+
+
+# ---- Set server ID ----
+
+@tree.command(name="setserverid", description="Set the Nitrado server ID used by this bot")
+@app_commands.describe(server_id="Nitrado service ID (numeric)")
+@app_commands.guilds(discord.Object(id=GUILD_ID))
+async def setserverid(interaction: discord.Interaction, server_id: int):
+    if not isinstance(interaction.user, discord.Member) or not user_is_admin(interaction.user):
+        await interaction.response.send_message("You do not have permission to use this command.", ephemeral=True)
+        return
+
+    set_nitrado_server_id(server_id)
+    await interaction.response.send_message(f"✅ Nitrado server ID has been updated to `{server_id}`.")
+
+
+# ---- Ping server / API ----
+
+@tree.command(name="pingserver", description="Ping Nitrado API and check basic connectivity")
+@app_commands.guilds(discord.Object(id=GUILD_ID))
+async def pingserver(interaction: discord.Interaction):
+    if not isinstance(interaction.user, discord.Member) or not user_is_admin(interaction.user):
+        await interaction.response.send_message("You do not have permission to use this command.", ephemeral=True)
+        return
+
+    if not nitrado_api.token:
+        await interaction.response.send_message("❌ No Nitrado token set. Configure `NITRADO_TOKEN` in environment.", ephemeral=True)
+        return
+
+    info = nitrado_api.get_server_info()
+    if info is None:
+        await interaction.response.send_message("❌ Nitrado API did not respond successfully. Check token, server ID, and scopes.")
+    else:
+        await interaction.response.send_message("✅ Nitrado API is reachable and responded successfully.")
+
+
+# ---- Status command ----
+
+@tree.command(name="status", description="Show detailed Nitrado DayZ server status")
+@app_commands.guilds(discord.Object(id=GUILD_ID))
+async def status(interaction: discord.Interaction):
+    if not isinstance(interaction.user, discord.Member) or not user_is_admin(interaction.user):
+        await interaction.response.send_message("You do not have permission to use this command.", ephemeral=True)
+        return
+
+    info = nitrado_api.get_server_info()
+    players = nitrado_api.get_online_players()
+
+    if info is None:
+        await interaction.response.send_message("❌ Could not retrieve server info. Check token and server ID.")
+        return
+
+    data = info.get("data", {})
+    server = data.get("gameserver", {})
+    name = server.get("name", "Unknown")
+    status_str = server.get("status", "Unknown")
+    slots = server.get("slots", "Unknown")
+    region = server.get("location", "Unknown")
+    ip = server.get("ip", "Unknown")
+    port = server.get("port", "Unknown")
+
+    player_count = len(players) if players else 0
+
+    bot_uptime = datetime.utcnow() - bot_start_time
+    uptime_str = str(timedelta(seconds=int(bot_uptime.total_seconds())))
+
+    msg = (
+        f"**Server Status**\n"
+        f"Name: `{name}`\n"
+        f"Status: `{status_str}`\n"
+        f"Slots: `{slots}`\n"
+        f"Region: `{region}`\n"
+        f"IP: `{ip}`\n"
+        f"Port: `{port}`\n"
+        f"Server ID: `{nitrado_api.server_id}`\n"
+        f"Online Players: `{player_count}`\n"
+        f"Bot Uptime: `{uptime_str}`\n"
+    )
+    await interaction.response.send_message(msg)
 
 
 # ---- Server info ----
@@ -469,15 +557,17 @@ async def serverinfo(interaction: discord.Interaction):
     data = info.get("data", {})
     server = data.get("gameserver", {})
     name = server.get("name", "Unknown")
-    status = server.get("status", "Unknown")
+    status_str = server.get("status", "Unknown")
     slots = server.get("slots", "Unknown")
+    region = server.get("location", "Unknown")
 
     msg = (
         f"**Server Info**\n"
         f"Name: `{name}`\n"
-        f"Status: `{status}`\n"
+        f"Status: `{status_str}`\n"
         f"Slots: `{slots}`\n"
-        f"Server ID: `{NITRADO_SERVER_ID}` (US, PS4)"
+        f"Region: `{region}`\n"
+        f"Server ID: `{nitrado_api.server_id}`"
     )
     await interaction.response.send_message(msg)
 
@@ -503,7 +593,8 @@ async def online(interaction: discord.Interaction):
     lines = []
     for p in players:
         name = p.get("name", "Unknown")
-        lines.append(f"- `{name}`")
+        connected = p.get("connected_since", "Unknown")
+        lines.append(f"- `{name}` (since: `{connected}`)")
 
     msg = "**Online Players:**\n" + "\n".join(lines)
     await interaction.response.send_message(msg)
@@ -551,6 +642,38 @@ async def startserver(interaction: discord.Interaction):
         await interaction.response.send_message("▶️ Server start command sent to Nitrado.")
     else:
         await interaction.response.send_message("❌ Failed to send start command. Check token and server.")
+
+
+# ---- Soft / hard restart ----
+
+@tree.command(name="restartsoft", description="Soft restart the DayZ server (Nitrado)")
+@app_commands.guilds(discord.Object(id=GUILD_ID))
+async def restartsoft(interaction: discord.Interaction):
+    await restartserver.callback(interaction)  # reuse logic
+
+
+@tree.command(name="restarthard", description="Hard restart (stop, wait, start) the DayZ server")
+@app_commands.guilds(discord.Object(id=GUILD_ID))
+async def restarthard(interaction: discord.Interaction):
+    if not isinstance(interaction.user, discord.Member) or not user_is_admin(interaction.user):
+        await interaction.response.send_message("You do not have permission to use this command.", ephemeral=True)
+        return
+
+    await interaction.response.send_message("🧨 Hard restart initiated: stopping server, waiting 30 seconds, then starting.", ephemeral=True)
+
+    ok_stop = nitrado_api.stop_server()
+    if not ok_stop:
+        await interaction.followup.send("❌ Failed to stop server. Aborting hard restart.")
+        return
+
+    time.sleep(30)
+
+    ok_start = nitrado_api.start_server()
+    if not ok_start:
+        await interaction.followup.send("❌ Failed to start server after stop. Manual intervention may be required.")
+        return
+
+    await interaction.followup.send("✅ Hard restart completed: server stopped and started again.")
 
 
 # ---- Player management ----
@@ -630,7 +753,7 @@ async def whitelistremove(interaction: discord.Interaction, player: str):
         await interaction.response.send_message(f"❌ Failed to remove `{player}` from whitelist. Check token and server.")
 
 
-# ---- Optional manual wipe command (if you ever need it again) ----
+# ---- Optional manual wipe command ----
 
 @tree.command(name="wipecommands", description="Admin-only: wipe all slash commands for this bot in this guild")
 @app_commands.guilds(discord.Object(id=GUILD_ID))
@@ -709,9 +832,92 @@ def discord_settings():
     return render_template("discord_settings.html", settings=settings, channels=channels)
 
 
-# =========================
-# API ENDPOINTS
-# =========================
+# ---- Dashboard status / API endpoints ----
+
+@app.route("/dashboard/status")
+def dashboard_status():
+    info = nitrado_api.get_server_info()
+    players = nitrado_api.get_online_players()
+
+    server_data = {}
+    if info:
+        data = info.get("data", {})
+        server = data.get("gameserver", {})
+        server_data = {
+            "name": server.get("name", "Unknown"),
+            "status": server.get("status", "Unknown"),
+            "slots": server.get("slots", "Unknown"),
+            "region": server.get("location", "Unknown"),
+            "ip": server.get("ip", "Unknown"),
+            "port": server.get("port", "Unknown"),
+            "server_id": nitrado_api.server_id,
+        }
+
+    player_list = []
+    if players:
+        for p in players:
+            player_list.append({
+                "name": p.get("name", "Unknown"),
+                "connected_since": p.get("connected_since", "Unknown"),
+            })
+
+    bot_uptime = datetime.utcnow() - bot_start_time
+    uptime_str = str(timedelta(seconds=int(bot_uptime.total_seconds())))
+
+    return render_template(
+        "status.html",
+        server=server_data,
+        players=player_list,
+        bot_uptime=uptime_str,
+    )
+
+
+@app.route("/api/serverinfo", methods=["GET"])
+def api_serverinfo():
+    info = nitrado_api.get_server_info()
+    if not info:
+        return jsonify({"error": "Could not retrieve server info"}), 500
+    return jsonify(info)
+
+
+@app.route("/api/online", methods=["GET"])
+def api_online():
+    players = nitrado_api.get_online_players()
+    if players is None:
+        return jsonify({"error": "Could not retrieve online players"}), 500
+    return jsonify(players)
+
+
+@app.route("/api/status", methods=["GET"])
+def api_status():
+    info = nitrado_api.get_server_info()
+    players = nitrado_api.get_online_players()
+
+    if info is None:
+        return jsonify({"error": "Could not retrieve server info"}), 500
+
+    data = info.get("data", {})
+    server = data.get("gameserver", {})
+    player_count = len(players) if players else 0
+
+    bot_uptime = datetime.utcnow() - bot_start_time
+    uptime_str = str(timedelta(seconds=int(bot_uptime.total_seconds())))
+
+    return jsonify({
+        "server": {
+            "name": server.get("name", "Unknown"),
+            "status": server.get("status", "Unknown"),
+            "slots": server.get("slots", "Unknown"),
+            "region": server.get("location", "Unknown"),
+            "ip": server.get("ip", "Unknown"),
+            "port": server.get("port", "Unknown"),
+            "server_id": nitrado_api.server_id,
+        },
+        "players": players or [],
+        "player_count": player_count,
+        "bot_uptime": uptime_str,
+    })
+
 
 @app.route("/api/zones", methods=["GET"])
 def api_get_zones():
