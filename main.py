@@ -38,7 +38,8 @@ ADMIN_ROLE_ID = 1419520911471542413
 DEFAULT_NITRADO_SERVER_ID = int(os.environ.get("NITRADO_SERVER_ID", "17649304"))
 
 # ⭐ US REGION (Miami server)
-NITRADO_API_BASE = "https://api-us.nitrado.net"
+NITRADO_API_BASE = "https://api.nitrado.net"
+
 
 bot_start_time = datetime.utcnow()
 
