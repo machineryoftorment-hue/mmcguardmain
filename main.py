@@ -298,6 +298,50 @@ async def debug_endpoints(interaction: discord.Interaction):
 
     embed = make_embed("Endpoint Debug Results", "\n".join(results), discord.Color.orange())
     await interaction.followup.send(embed=embed, ephemeral=True)
+    
+@tree.command(name="debug_endpoints_full", description="Test ALL Nitrado player-action endpoints")
+@app_commands.guilds(discord.Object(id=GUILD_ID))
+async def debug_endpoints_full(interaction: discord.Interaction):
+    if not isinstance(interaction.user, discord.Member) or not user_is_admin(interaction.user):
+        return await interaction.response.send_message("No permission", ephemeral=True)
+
+    await interaction.response.defer(ephemeral=True)
+
+    sid = nitrado.sid
+    token = NITRADO_TOKEN
+    headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+
+    base = f"https://api.nitrado.net/services/{sid}"
+
+    actions = ["ban", "kick", "unban", "whitelist/add"]
+    results = []
+
+    for action in actions:
+        endpoints = [
+            f"/gameservers/players/{action}",
+            f"/gameservers/players/{action}?player=TestName",
+            f"/gameservers/players/{action}/TestName",
+
+            f"/gameservers/command/players/{action}",
+            f"/gameservers/command/players/{action}?player=TestName",
+            f"/gameservers/command/players/{action}/TestName",
+
+            f"/gameservers/games/players/{action}",
+            f"/gameservers/games/players/{action}?name=TestName",
+            f"/gameservers/games/players/{action}/TestName",
+        ]
+
+        for ep in endpoints:
+            url = base + ep
+            try:
+                r = requests.post(url, headers=headers, json={"name": "TestName"})
+                results.append(f"{action} → `{ep}` → {r.status_code}")
+            except Exception as e:
+                results.append(f"{action} → `{ep}` → ERROR: {str(e)}")
+
+    embed = make_embed("FULL Endpoint Debug Results", "\n".join(results), discord.Color.orange())
+    await interaction.followup.send(embed=embed, ephemeral=True)
+
 
 
 @app.route("/")
