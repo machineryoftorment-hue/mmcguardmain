@@ -405,15 +405,18 @@ def make_embed(
 # -------------------------------------------------
 @bot.event
 async def on_ready():
-    global CHANNELS_CACHE
-    CHANNELS_CACHE = reload_channel_settings()
     guild = bot.get_guild(GUILD_ID)
-    if guild:
-        try:
-            await tree.sync(guild=guild)
-            logger.info(f"Commands synced safely to guild {guild.id}")
-        except Exception as e:
-            logger.exception(e)
+
+    # 1. Sync your new guild commands
+    await tree.sync(guild=guild)
+
+    # 2. Wipe ALL old global commands
+    cmds = await tree.fetch_commands()
+    for c in cmds:
+        await c.delete()
+
+    print("Global commands wiped")
+
     logger.info(f"Logged in as {bot.user} (ID: {bot.user.id})")
 
 
