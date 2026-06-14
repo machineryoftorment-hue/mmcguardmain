@@ -326,17 +326,49 @@ async def startserver(interaction:discord.Interaction):
     e=make_embed("Server Start","🟢 Start command sent to Nitrado.",discord.Color.green()) if ok else make_embed("Server Start","❌ Failed to send start command to Nitrado.",discord.Color.red())
     await interaction.followup.send(embed=e)
 
-@tree.command(name="online",description="List online players")
+import a2s  # pip install a2s
+
+@tree.command(name="online", description="Show online players using Steam Query")
 @app_commands.guilds(discord.Object(id=GUILD_ID))
-async def online(interaction:discord.Interaction):
-    user=interaction.user
-    if not isinstance(user,discord.Member) or not user_is_admin(user):
-        await interaction.response.send_message("You do not have permission to use this command.",ephemeral=True);return
-    players=nitrado_api.get_online_players()
-    if not players:
-        await interaction.response.send_message(embed=make_embed("Online Players","No players are currently online.",discord.Color.blue()));return
-    lines=[f"- `{p.get('name','Unknown')}` (ping: {p.get('ping','N/A')})" for p in players]
-    await interaction.response.send_message(embed=make_embed("Online Players","\n".join(lines),discord.Color.blue()))
+async def online(interaction: discord.Interaction):
+    user = interaction.user
+    if not isinstance(user, discord.Member) or not user_is_admin(user):
+        await interaction.response.send_message("You do not have permission to use this command.", ephemeral=True)
+        return
+
+    await interaction.response.defer()
+
+    SERVER_IP = "109.230.243.79"
+    QUERY_PORT = 10201  # game port + 1
+
+    try:
+        # Query server info
+        info = a2s.info((SERVER_IP, QUERY_PORT))
+        players = a2s.players((SERVER_IP, QUERY_PORT))
+
+        if not players:
+            await interaction.followup.send(embed=make_embed("Online Players", "No players online.", discord.Color.blue()))
+            return
+
+        # Build detailed embed
+        description = ""
+        for p in players:
+            name = p.name if p.name else "Unknown"
+            ping = f"{p.ping}ms" if hasattr(p, "ping") else "N/A"
+            description += f"**{name}** — Ping: `{ping}`\n"
+
+        embed = make_embed(
+            f"🟢 Online Players ({len(players)})",
+            description,
+            discord.Color.green()
+        )
+
+        await interaction.followup.send(embed=embed)
+
+    except Exception as e:
+        await interaction.followup.send(
+            embed=make_embed("Error", f"Could not query server.\n```\n{e}\n```", discord.Color.red())
+        )
 
 @tree.command(name="ban",description="Ban a player via FTP (instant)")
 @app_commands.guilds(discord.Object(id=GUILD_ID))
