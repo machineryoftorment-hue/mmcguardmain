@@ -3,4 +3,4 @@ Flask
 requests
 python-dotenv
 psycopg2-binary
-
+a2s
