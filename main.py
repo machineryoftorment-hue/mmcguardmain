@@ -167,6 +167,12 @@ class NitradoAPI:
     def restart_server(self)->bool:return self._post("/gameservers/restart",{}) is not None
     def stop_server(self)->bool:return self._post("/gameservers/stop",{}) is not None
     def start_server(self)->bool:return self._post("/gameservers/start",{}) is not None
+    def ban_player(self,name:str)->bool:
+        data=self._post("/gameservers/games/players/ban",{"name":name})
+        return data is not None
+    def unban_player(self,name:str)->bool:
+        data=self._post("/gameservers/games/players/unban",{"name":name})
+        return data is not None
 
 nitrado_api=NitradoAPI()
 
@@ -219,12 +225,6 @@ def update_list_file(path:str,name:str,mode:str)->bool:
     except Exception as e:
         logger.exception(f"FTP update failed for {path}: {e}")
         return False
-
-def ban_via_ftp(name:str)->bool:
-    return update_list_file(FTP_BANS_PATH,name,"add")
-
-def unban_via_ftp(name:str)->bool:
-    return update_list_file(FTP_BANS_PATH,name,"remove")
 
 def whitelist_add_via_ftp(name:str)->bool:
     return update_list_file(FTP_WHITELIST_PATH,name,"add")
@@ -339,10 +339,9 @@ async def online(interaction: discord.Interaction):
     await interaction.response.defer()
 
     SERVER_IP = "109.230.243.79"
-    QUERY_PORT = 10201  # game port + 1
+    QUERY_PORT = 10203  # correct query/RCON port from Nitrado panel
 
     try:
-        # Query server info
         info = a2s.info((SERVER_IP, QUERY_PORT))
         players = a2s.players((SERVER_IP, QUERY_PORT))
 
@@ -350,7 +349,6 @@ async def online(interaction: discord.Interaction):
             await interaction.followup.send(embed=make_embed("Online Players", "No players online.", discord.Color.blue()))
             return
 
-        # Build detailed embed
         description = ""
         for p in players:
             name = p.name if p.name else "Unknown"
@@ -370,30 +368,30 @@ async def online(interaction: discord.Interaction):
             embed=make_embed("Error", f"Could not query server.\n```\n{e}\n```", discord.Color.red())
         )
 
-@tree.command(name="ban",description="Ban a player via FTP (instant)")
+@tree.command(name="ban",description="Ban a player via Nitrado Banlist (dashboard)")
 @app_commands.guilds(discord.Object(id=GUILD_ID))
 async def ban(interaction:discord.Interaction,player_name:str):
     user=interaction.user
     if not isinstance(user,discord.Member) or not user_is_admin(user):
         await interaction.response.send_message("You do not have permission to use this command.",ephemeral=True);return
     await interaction.response.defer(ephemeral=True)
-    ok=ban_via_ftp(player_name)
+    ok=nitrado_api.ban_player(player_name)
     if not ok:
-        await interaction.followup.send(embed=make_embed("Ban Player","❌ Failed to update bans.txt via FTP.",discord.Color.red()),ephemeral=True);return
-    e=make_embed("Ban Player",f"🔴 Player `{player_name}` added to bans.txt (instant ban, no restart).",discord.Color.red())
+        await interaction.followup.send(embed=make_embed("Ban Player","❌ Failed to update Nitrado Banlist via API.",discord.Color.red()),ephemeral=True);return
+    e=make_embed("Ban Player",f"🔴 Player `{player_name}` added to Nitrado Banlist (dashboard).",discord.Color.red())
     await interaction.followup.send(embed=e,ephemeral=True)
 
-@tree.command(name="unban",description="Unban a player via FTP (instant)")
+@tree.command(name="unban",description="Unban a player via Nitrado Banlist (dashboard)")
 @app_commands.guilds(discord.Object(id=GUILD_ID))
 async def unban(interaction:discord.Interaction,player_name:str):
     user=interaction.user
     if not isinstance(user,discord.Member) or not user_is_admin(user):
         await interaction.response.send_message("You do not have permission to use this command.",ephemeral=True);return
     await interaction.response.defer(ephemeral=True)
-    ok=unban_via_ftp(player_name)
+    ok=nitrado_api.unban_player(player_name)
     if not ok:
-        await interaction.followup.send(embed=make_embed("Unban Player","❌ Failed to update bans.txt via FTP.",discord.Color.red()),ephemeral=True);return
-    e=make_embed("Unban Player",f"🟢 Player `{player_name}` removed from bans.txt (instant unban).",discord.Color.green())
+        await interaction.followup.send(embed=make_embed("Unban Player","❌ Failed to update Nitrado Banlist via API.",discord.Color.red()),ephemeral=True);return
+    e=make_embed("Unban Player",f"🟢 Player `{player_name}` removed from Nitrado Banlist (dashboard).",discord.Color.green())
     await interaction.followup.send(embed=e,ephemeral=True)
 
 @tree.command(name="whitelist_add",description="Add a player to the whitelist via FTP (instant)")
