@@ -271,11 +271,11 @@ def update_list_file(path: str, name: str, mode: str):
 # ---------------------------------------------------------
 class NitradoAPI:
     def __init__(self):
-        self.base_url = NITRADO_API_BASE
+        self.base_url = "https://api.nitrado.net"
 
     @property
     def server_id(self):
-        return get_nitrado_server_id()
+        return get_nitrado_server_id()  # 17649304
 
     @property
     def token(self):
@@ -295,38 +295,45 @@ class NitradoAPI:
         return f"{self.base_url}/services/{self.server_id}{path}"
 
     def _get(self, path: str):
-        if not self.token:
-            return None
         try:
             r = requests.get(self._url(path), headers=self.headers, timeout=10)
             if r.status_code == 200:
                 return r.json()
-            logger.warning(f"Nitrado GET {path} failed: {r.status_code} {r.text}")
+            logger.error(f"Nitrado GET {path} failed: {r.status_code} {r.text}")
             return None
         except Exception as e:
             logger.exception(e)
             return None
 
-    def _post(self, path: str, payload: Dict[str, Any]):
-        if not self.token:
-            return None
+    def _post(self, path: str):
         try:
-            r = requests.post(self._url(path), headers=self.headers, json=payload, timeout=10)
+            r = requests.post(self._url(path), headers=self.headers, timeout=10)
             if r.status_code == 200:
                 return r.json()
-            logger.warning(f"Nitrado POST {path} failed: {r.status_code} {r.text}")
+            logger.error(f"Nitrado POST {path} failed: {r.status_code} {r.text}")
             return None
         except Exception as e:
             logger.exception(e)
             return None
 
+    # -------------------------
+    # STATUS
+    # -------------------------
     def get_server_info(self):
         return self._get("/gameservers")
 
+    # -------------------------
+    # ONLINE PLAYERS
+    # -------------------------
     def get_online_players(self):
         data = self._get("/gameservers/players")
-        return None if not data else data.get("data", {}).get("players", [])
+        if not data:
+            return []
+        return data.get("data", {}).get("players", [])
 
+    # -------------------------
+    # PLAYER POSITIONS
+    # -------------------------
     def get_player_positions(self):
         info = self.get_server_info()
         if not info:
@@ -334,20 +341,49 @@ class NitradoAPI:
         gs = info.get("data", {}).get("gameserver", {})
         return gs.get("players", [])
 
+    # -------------------------
+    # SERVER CONTROL
+    # -------------------------
     def restart_server(self):
-        return self._post("/gameservers/restart", {}) is not None
+        return self._post("/gameservers/restart") is not None
 
     def stop_server(self):
-        return self._post("/gameservers/stop", {}) is not None
+        return self._post("/gameservers/stop") is not None
 
     def start_server(self):
-        return self._post("/gameservers/start", {}) is not None
+        return self._post("/gameservers/start") is not None
 
+    # -------------------------
+    # BAN / UNBAN
+    # -------------------------
     def ban_player(self, name: str):
-        return self._post("/gameservers/games/players/ban", {"name": name}) is not None
+        payload = {"name": name}
+        try:
+            r = requests.post(
+                self._url("/gameservers/games/players/ban"),
+                headers=self.headers,
+                json=payload,
+                timeout=10
+            )
+            return r.status_code == 200
+        except Exception as e:
+            logger.exception(e)
+            return False
 
     def unban_player(self, name: str):
-        return self._post("/gameservers/games/players/unban", {"name": name}) is not None
+        payload = {"name": name}
+        try:
+            r = requests.post(
+                self._url("/gameservers/games/players/unban"),
+                headers=self.headers,
+                json=payload,
+                timeout=10
+            )
+            return r.status_code == 200
+        except Exception as e:
+            logger.exception(e)
+            return False
+
 
 nitrado_api = NitradoAPI()
 
