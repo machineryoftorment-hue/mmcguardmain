@@ -305,14 +305,15 @@ def make_embed(title: str, description: str = "", color: discord.Color = discord
 @bot.event
 async def on_ready():
     guild = bot.get_guild(GUILD_ID)
-    await tree.sync(guild=guild)
-    cmds = await tree.fetch_commands()
-    for c in cmds: await c.delete()
 
-    # ⭐ Start location feed
+    # Sync commands normally
+    await tree.sync(guild=guild)
+
+    # Start location feed
     bot.loop.create_task(location_feed_task())
 
     logger.info(f"Logged in as {bot.user} (ID: {bot.user.id})")
+
 
 # -------------------------
 # COMMANDS
