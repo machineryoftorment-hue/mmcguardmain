@@ -277,9 +277,11 @@ class NitradoAPI:
     def server_id(self):
         return get_nitrado_server_id()  # 17649304
 
-    @property
-    def token(self):
-        return NITRADO_TOKEN
+@property
+def token(self):
+    # Render fix: always read from environment at runtime
+    return os.getenv("NITRADO_TOKEN")
+
 
     @property
     def headers(self):
