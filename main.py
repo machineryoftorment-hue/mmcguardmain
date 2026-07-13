@@ -341,50 +341,21 @@ def token(self):
         if not info:
             return []
         gs = info.get("data", {}).get("gameserver", {})
-        return gs.get("players", [])
+        players = gs.get("players", [])
+        return players if isinstance(players, list) else []
 
     # -------------------------
     # SERVER CONTROL
     # -------------------------
     def restart_server(self):
-        return self._post("/gameservers/restart") is not None
+        return self._post("/gameservers/restart", {}) is not None
 
     def stop_server(self):
-        return self._post("/gameservers/stop") is not None
+        return self._post("/gameservers/stop", {}) is not None
 
     def start_server(self):
-        return self._post("/gameservers/start") is not None
+        return self._post("/gameservers/start", {}) is not None
 
-    # -------------------------
-    # BAN / UNBAN
-    # -------------------------
-    def ban_player(self, name: str):
-        payload = {"name": name}
-        try:
-            r = requests.post(
-                self._url("/gameservers/games/players/ban"),
-                headers=self.headers,
-                json=payload,
-                timeout=10
-            )
-            return r.status_code == 200
-        except Exception as e:
-            logger.exception(e)
-            return False
-
-    def unban_player(self, name: str):
-        payload = {"name": name}
-        try:
-            r = requests.post(
-                self._url("/gameservers/games/players/unban"),
-                headers=self.headers,
-                json=payload,
-                timeout=10
-            )
-            return r.status_code == 200
-        except Exception as e:
-            logger.exception(e)
-            return False
 
 
 nitrado_api = NitradoAPI()
