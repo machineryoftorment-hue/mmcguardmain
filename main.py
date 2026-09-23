@@ -31,7 +31,7 @@ PROFANITY_MAP = {
     "fuck": "fork",
     "shit": "poopoo",
     "bitch": "goose",
-    "bastard": "son of an unmarried mother",
+    "bastard": "child of unmarried parents",
     "ass": "butt",
     "dick": "noodle",
     "cunt": "sea cucumber",
@@ -44,14 +44,17 @@ bot = commands.Bot(command_prefix=BOT_PREFIX, intents=INTENTS)
 
 
 # -------------------------
-# Grammar‑ignoring profanity replacer (regex)
+# Fuzzy profanity replacer (handles repeated letters)
 # -------------------------
 
 def replace_profanity(text: str) -> str:
     cleaned = text
 
     for bad, funny in PROFANITY_MAP.items():
-        pattern = re.compile(re.escape(bad), re.IGNORECASE)
+        # Build fuzzy pattern: each letter can repeat 1+ times
+        fuzzy = "".join([f"{re.escape(c)}+" for c in bad])
+
+        pattern = re.compile(fuzzy, re.IGNORECASE)
         cleaned = pattern.sub(funny, cleaned)
 
     return cleaned
@@ -77,7 +80,7 @@ async def get_or_create_webhook(channel: discord.TextChannel) -> discord.Webhook
 @bot.event
 async def on_ready():
     print(f"Logged in as {bot.user} (ID: {bot.user.id})")
-    print("Profanity → Funny webhook replacer is online.")
+    print("Fuzzy profanity → funny webhook replacer is online.")
 
 
 @bot.event
