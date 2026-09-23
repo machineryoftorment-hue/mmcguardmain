@@ -3,6 +3,11 @@ import discord
 from discord.ext import commands
 from flask import Flask
 import threading
+import re
+
+# -------------------------
+# Flask server (keeps Render alive)
+# -------------------------
 
 app = Flask(__name__)
 
@@ -11,18 +16,22 @@ def home():
     return "MMCGuard is running"
 
 
+# -------------------------
+# Discord bot setup
+# -------------------------
+
 INTENTS = discord.Intents.default()
 INTENTS.message_content = True
 
 BOT_PREFIX = "!"
-TOKEN = os.getenv("DISCORD_BOT_TOKEN")  # <-- matches your Render variable name
+TOKEN = os.getenv("DISCORD_BOT_TOKEN")  # Make sure Render uses this exact name
 
 # Swear → funny replacement
 PROFANITY_MAP = {
     "fuck": "fork",
     "shit": "poopoo",
     "bitch": "goose",
-    "bastard": "potato",
+    "bastard": "son of an unmarried mother",
     "ass": "butt",
     "dick": "noodle",
     "cunt": "sea cucumber",
@@ -34,20 +43,23 @@ PROFANITY_MAP = {
 bot = commands.Bot(command_prefix=BOT_PREFIX, intents=INTENTS)
 
 
+# -------------------------
+# Grammar‑ignoring profanity replacer (regex)
+# -------------------------
+
 def replace_profanity(text: str) -> str:
-    words = text.split(" ")
-    new_words = []
+    cleaned = text
 
-    for w in words:
-        base = w.lower().strip(".,!?;:()[]{}\"'")
-        replacement = PROFANITY_MAP.get(base)
-        if replacement:
-            new_words.append(w.replace(base, replacement))
-        else:
-            new_words.append(w)
+    for bad, funny in PROFANITY_MAP.items():
+        pattern = re.compile(re.escape(bad), re.IGNORECASE)
+        cleaned = pattern.sub(funny, cleaned)
 
-    return " ".join(new_words)
+    return cleaned
 
+
+# -------------------------
+# Webhook helper
+# -------------------------
 
 async def get_or_create_webhook(channel: discord.TextChannel) -> discord.Webhook:
     hooks = await channel.webhooks()
@@ -57,6 +69,10 @@ async def get_or_create_webhook(channel: discord.TextChannel) -> discord.Webhook
 
     return await channel.create_webhook(name="MMCGuardFilter")
 
+
+# -------------------------
+# Events
+# -------------------------
 
 @bot.event
 async def on_ready():
@@ -72,10 +88,12 @@ async def on_message(message: discord.Message):
     original = message.content
     cleaned = replace_profanity(original)
 
+    # If nothing changed, do nothing
     if cleaned == original:
         await bot.process_commands(message)
         return
 
+    # Delete original message
     try:
         await message.delete()
     except discord.Forbidden:
@@ -84,6 +102,7 @@ async def on_message(message: discord.Message):
         )
         return
 
+    # Send cleaned message as webhook
     webhook = await get_or_create_webhook(message.channel)
 
     await webhook.send(
@@ -95,6 +114,10 @@ async def on_message(message: discord.Message):
     await bot.process_commands(message)
 
 
+# -------------------------
+# Commands
+# -------------------------
+
 @bot.command(name="filterinfo")
 async def filter_info(ctx: commands.Context):
     await ctx.send(
@@ -104,15 +127,17 @@ async def filter_info(ctx: commands.Context):
     )
 
 
+# -------------------------
+# Flask runner + bot runner
+# -------------------------
+
 def run_flask():
     app.run(host="0.0.0.0", port=10000)
+
 
 if __name__ == "__main__":
     if not TOKEN:
         raise RuntimeError("Set DISCORD_BOT_TOKEN env var or hardcode your token.")
 
-    # Start Flask server in background
     threading.Thread(target=run_flask).start()
-
-    # Start Discord bot
     bot.run(TOKEN)
