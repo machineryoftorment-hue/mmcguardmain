@@ -6,7 +6,7 @@ INTENTS = discord.Intents.default()
 INTENTS.message_content = True
 
 BOT_PREFIX = "!"
-TOKEN = os.getenv("DISCORD_TOKEN")
+TOKEN = os.getenv("DISCORD_BOT_TOKEN")
 
 # Swear → funny replacement
 PROFANITY_MAP = {
