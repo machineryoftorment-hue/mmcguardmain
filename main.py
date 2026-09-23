@@ -41,7 +41,7 @@ PROFANITY_MAP = {
     "bish": "goose",
     "biatch": "goose",
 
-    "bastard": "potato",
+    "bastard": "barnacle",
 
     "ass": "butt",
     "azz": "butt",
@@ -66,7 +66,7 @@ PROFANITY_MAP = {
     "shithead": "poopoohead",
     "fuckface": "forkface",
 
-    "twat": "twerp",
+    "twat": "twig",
     "prick": "pinecone",
 }
 
