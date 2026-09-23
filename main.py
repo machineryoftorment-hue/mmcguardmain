@@ -1,12 +1,21 @@
 import os
 import discord
 from discord.ext import commands
+from flask import Flask
+import threading
+
+app = Flask(__name__)
+
+@app.route('/')
+def home():
+    return "MMCGuard is running"
+
 
 INTENTS = discord.Intents.default()
 INTENTS.message_content = True
 
 BOT_PREFIX = "!"
-TOKEN = os.getenv("DISCORD_BOT_TOKEN")
+TOKEN = os.getenv("DISCORD_BOT_TOKEN")  # <-- matches your Render variable name
 
 # Swear → funny replacement
 PROFANITY_MAP = {
@@ -41,13 +50,11 @@ def replace_profanity(text: str) -> str:
 
 
 async def get_or_create_webhook(channel: discord.TextChannel) -> discord.Webhook:
-    # Try to find an existing webhook
     hooks = await channel.webhooks()
     for hook in hooks:
         if hook.name == "MMCGuardFilter":
             return hook
 
-    # Otherwise create one
     return await channel.create_webhook(name="MMCGuardFilter")
 
 
@@ -65,22 +72,18 @@ async def on_message(message: discord.Message):
     original = message.content
     cleaned = replace_profanity(original)
 
-    # If nothing changed, do nothing
     if cleaned == original:
         await bot.process_commands(message)
         return
 
-    # Delete original message
     try:
         await message.delete()
     except discord.Forbidden:
-        # If we cannot delete, fallback to normal send
         await message.channel.send(
             f"🧼 **Cleaned message from {message.author.mention}:**\n{cleaned}"
         )
         return
 
-    # Send cleaned message as webhook
     webhook = await get_or_create_webhook(message.channel)
 
     await webhook.send(
@@ -101,7 +104,13 @@ async def filter_info(ctx: commands.Context):
     )
 
 
+def run_flask():
+    app.run(host="0.0.0.0", port=10000)
+
+
 if __name__ == "__main__":
     if not TOKEN:
-        raise RuntimeError("Set DISCORD_TOKEN env var or hardcode your token.")
+        raise RuntimeError("Set DISCORD_BOT_TOKEN env var or hardcode your token.")
+
+    threading.Thread(target=run_flask).start()
     bot.run(TOKEN)
