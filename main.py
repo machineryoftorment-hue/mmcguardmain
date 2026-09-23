@@ -107,10 +107,12 @@ async def filter_info(ctx: commands.Context):
 def run_flask():
     app.run(host="0.0.0.0", port=10000)
 
-
 if __name__ == "__main__":
     if not TOKEN:
         raise RuntimeError("Set DISCORD_BOT_TOKEN env var or hardcode your token.")
 
+    # Start Flask server in background
     threading.Thread(target=run_flask).start()
+
+    # Start Discord bot
     bot.run(TOKEN)
