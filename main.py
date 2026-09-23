@@ -29,16 +29,47 @@ TOKEN = os.getenv("DISCORD_BOT_TOKEN")  # Make sure Render uses this exact name
 # Swear → funny replacement
 PROFANITY_MAP = {
     "fuck": "fork",
+    "fuk": "fork",
+    "f*ck": "fork",
+    "f**k": "fork",
+
     "shit": "poopoo",
+    "sh1t": "poopoo",
+    "sh!t": "poopoo",
+
     "bitch": "goose",
-    "bastard": "child of unmarried parents",
+    "bish": "goose",
+    "biatch": "goose",
+
+    "bastard": "potato",
+
     "ass": "butt",
+    "azz": "butt",
+    "a$$": "butt",
+
     "dick": "noodle",
+    "dik": "noodle",
+    "d1ck": "noodle",
+
     "cunt": "sea cucumber",
-    "motherfucker": "motherhugger",
+    "c*nt": "sea cucumber",
+
+
     "bullshit": "bullsneeze",
-    "crap": "crumbs",
+    "bullsh*t": "bullsneeze",
+
+    "motherfucker": "motherhugger",
+    "motherf*cker": "motherhugger",
+
+    "asshole": "butthole",
+    "dickhead": "noodlehead",
+    "shithead": "poopoohead",
+    "fuckface": "forkface",
+
+    "twat": "twerp",
+    "prick": "pinecone",
 }
+
 
 bot = commands.Bot(command_prefix=BOT_PREFIX, intents=INTENTS)
 
