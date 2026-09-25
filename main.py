@@ -101,13 +101,28 @@ async def get_or_create_webhook(channel: discord.TextChannel) -> discord.Webhook
 # HF AI Repair Engine
 # -------------------------
 
+# ============================
+# 2. AI REPAIR ENGINE (REPLICATE)
+# ============================
+
+import requests
+import asyncio
+import os
+
 async def call_ai_repair_engine(content: str) -> str:
+    """
+    Sends malformed JSON/XML to Replicate's LLaMA-3 model for repair.
+    Returns ONLY the corrected file.
+    """
+
     api_key = os.getenv("REPLICATE_API_KEY")
     if not api_key:
         return "ERROR: REPLICATE_API_KEY is not set."
 
+    # Replicate model endpoint (FREE)
     url = "https://api.replicate.com/v1/models/meta/meta-llama-3-8b-instruct/predictions"
 
+    # Prompt for structured JSON/XML repair
     payload = {
         "input": {
             "prompt": (
@@ -126,6 +141,7 @@ async def call_ai_repair_engine(content: str) -> str:
         "Content-Type": "application/json"
     }
 
+    # Send the request
     response = requests.post(url, json=payload, headers=headers)
 
     try:
@@ -140,6 +156,7 @@ async def call_ai_repair_engine(content: str) -> str:
             ).json()
 
             if poll["status"] == "succeeded":
+                # Replicate returns output as a list
                 return poll["output"][0]
 
             if poll["status"] == "failed":
@@ -149,6 +166,7 @@ async def call_ai_repair_engine(content: str) -> str:
 
     except Exception:
         return "AI ERROR:\n" + response.text
+
 
 
 
