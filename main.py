@@ -109,7 +109,7 @@ async def call_ai_repair_engine(content: str) -> str:
     url = "https://api.groq.com/openai/v1/chat/completions"
 
     payload = {
-    "model": "mixtral-8x7b-32768",
+    "model": "llama-3.1-70b-versatile",
     "messages": [
         {
             "role": "system",
