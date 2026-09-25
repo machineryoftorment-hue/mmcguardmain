@@ -4,4 +4,6 @@ requests
 python-dotenv
 psycopg2-binary
 python-a2s
+requests==2.31.0
+
 
