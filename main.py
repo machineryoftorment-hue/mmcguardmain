@@ -5,6 +5,7 @@ from flask import Flask
 import threading
 import re
 import json
+import requests   # Needed for Groq AI calls
 
 # -------------------------
 # Flask server (keeps Render alive)
@@ -97,6 +98,51 @@ async def get_or_create_webhook(channel: discord.TextChannel) -> discord.Webhook
             return hook
     return await channel.create_webhook(name="MMCGuardFilter")
 # -------------------------
+# Groq AI Repair Engine
+# -------------------------
+
+async def call_ai_repair_engine(content: str) -> str:
+    api_key = os.getenv("GROQ_API_KEY")
+    if not api_key:
+        return "ERROR: GROQ_API_KEY is not set in Render."
+
+    url = "https://api.groq.com/openai/v1/chat/completions"
+
+    payload = {
+        "model": "mixtral-8x7b-32768",
+        "messages": [
+            {
+                "role": "system",
+                "content": (
+                    "You are an expert JSON/XML repair engine. "
+                    "Your job is to fix malformed JSON or XML while preserving ALL values. "
+                    "Do not invent new values. Do not remove objects. "
+                    "Do not reorder objects unless absolutely required. "
+                    "Return ONLY the corrected file with no explanation."
+                )
+            },
+            {
+                "role": "user",
+                "content": content
+            }
+        ],
+        "temperature": 0
+    }
+
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json"
+    }
+
+    response = requests.post(url, json=payload, headers=headers)
+
+    try:
+        return response.json()["choices"][0]["message"]["content"]
+    except Exception:
+        return "AI ERROR:\n" + response.text
+
+
+# -------------------------
 # Commands
 # -------------------------
 
@@ -110,7 +156,7 @@ async def filter_info(ctx: commands.Context):
 
 
 # -------------------------
-# !validate
+# !validate (unchanged)
 # -------------------------
 
 @bot.command(name="validate")
@@ -162,7 +208,7 @@ async def validate(ctx):
 
 
 # -------------------------
-# !fixai — Aggressive AI Repair (C1 + D2)
+# !fixai — Groq AI Repair
 # -------------------------
 
 @bot.command(name="fixai")
@@ -171,157 +217,15 @@ async def fixai(ctx):
         return await ctx.send("Please upload a JSON or XML file with the command.")
 
     attachment = ctx.message.attachments[0]
-    raw = (await attachment.read()).decode("utf-8", errors="ignore").strip()
+    raw = (await attachment.read()).decode("utf-8", errors="ignore")
 
-    is_json = raw.startswith("{")
-    is_xml = raw.startswith("<")
+    await ctx.send("🧠 Sending file to AI repair engine...")
 
-    if not (is_json or is_xml):
-        return await ctx.send("Unknown format. Must start with `{` or `<`.")
+    fixed = await call_ai_repair_engine(raw)
 
-    tokens = re.findall(r"[{}[\]<>/]|\".*?\"|\S+", raw)
-
-    summary = {
-        "missing_commas": 0,
-        "objects_rebuilt": 0,
-        "fields_added": 0,
-        "tags_closed": 0,
-        "tags_rebuilt": 0
-    }
-
-    # -------------------------
-    # JSON MODEL — Aggressive Mode (C1 + D2)
-    # -------------------------
-
-    def repair_json(tokens):
-        obj_keys = {"name", "pos", "ypr", "scale", "enableCEPersistency", "customString"}
-        output = []
-        last = ""
-
-        # Insert missing commas between fields
-        for t in tokens:
-            if last and last not in "{[," and t not in "}],":
-                if last not in [":"]:
-                    output.append(",")
-                    summary["missing_commas"] += 1
-            output.append(t)
-            last = t
-
-        repaired = "".join(output)
-
-        # Remove trailing commas
-        repaired = repaired.replace(",}", "}").replace(",]", "]")
-
-        # Try to parse
-        try:
-            data = json.loads(repaired)
-        except Exception:
-            # Aggressive fallback: return structurally repaired text
-            summary["objects_rebuilt"] += 1
-            return repaired
-
-        # If parsed, enforce required fields
-        if "Objects" not in data or not isinstance(data["Objects"], list):
-            data["Objects"] = []
-            summary["objects_rebuilt"] += 1
-
-        fixed_objects = []
-        for obj in data["Objects"]:
-            new = {}
-            for k in obj_keys:
-                if k not in obj:
-                    summary["fields_added"] += 1
-                    if k == "pos":
-                        new[k] = [0.0, 0.0, 0.0]
-                    elif k == "ypr":
-                        new[k] = [0.0, 0.0, 0.0]
-                    elif k == "scale":
-                        new[k] = 1.0
-                    elif k == "enableCEPersistency":
-                        new[k] = 0
-                    elif k == "customString":
-                        new[k] = ""
-                    elif k == "name":
-                        new[k] = "UnknownObject"
-                else:
-                    new[k] = obj[k]
-            fixed_objects.append(new)
-
-        return json.dumps({"Objects": fixed_objects}, indent=4)
-
-    # -------------------------
-    # XML MODEL — Aggressive Mode
-    # -------------------------
-
-    def repair_xml(tokens):
-        valid_tags = {
-            "spawnabletypes", "type", "damage", "hoarder",
-            "cargo", "item", "attachments", "tag"
-        }
-
-        output = []
-        stack = []
-
-        for t in tokens:
-            if t.startswith("<") and not t.startswith("</") and ">" in t:
-                tag = t.replace("<", "").replace(">", "").split()[0]
-                if tag in valid_tags:
-                    stack.append(tag)
-                output.append(t)
-                continue
-
-            if t.startswith("</"):
-                tag = t.replace("</", "").replace(">", "")
-                if stack and stack[-1] == tag:
-                    stack.pop()
-                    output.append(t)
-                else:
-                    if stack:
-                        output.append(f"</{stack[-1]}>")
-                        summary["tags_closed"] += 1
-                        stack.pop()
-                continue
-
-            output.append(t)
-
-        while stack:
-            output.append(f"</{stack.pop()}>")
-            summary["tags_closed"] += 1
-
-        return "".join(output)
-
-    # -------------------------
-    # RUN MODEL
-    # -------------------------
-
-    if is_json:
-        fixed = repair_json(tokens)
-        filename = "fixed_ai.json"
-    else:
-        fixed = repair_xml(tokens)
-        filename = "fixed_ai.xml"
-
-    # -------------------------
-    # SAVE FILE
-    # -------------------------
-
+    filename = "fixed_ai.txt"
     with open(filename, "w", encoding="utf-8") as f:
         f.write(fixed)
-
-    # -------------------------
-    # SUMMARY MESSAGE
-    # -------------------------
-
-    summary_msg = (
-        "🧠 **AI Repair Summary**\n"
-        f"- Missing commas fixed: **{summary['missing_commas']}**\n"
-        f"- Objects rebuilt: **{summary['objects_rebuilt']}**\n"
-        f"- Fields added: **{summary['fields_added']}**\n"
-        f"- XML tags auto-closed: **{summary['tags_closed']}**\n"
-        f"- XML tag repairs: **{summary['tags_rebuilt']}**\n"
-    )
-
-    await ctx.send(summary_msg)
 
     await ctx.send(
         content="Here is your AI‑repaired file:",
@@ -335,6 +239,7 @@ async def fixai(ctx):
 async def on_ready():
     print(f"Logged in as {bot.user} (ID: {bot.user.id})")
     print("Fuzzy profanity → funny webhook replacer is online.")
+    print("Groq AI repair engine active.")
 
 
 @bot.event
