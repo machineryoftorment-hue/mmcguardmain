@@ -5,7 +5,7 @@ from flask import Flask
 import threading
 import re
 import json
-import xml.etree.ElementTree as ET
+import xml.etree.ElementTree as ET  # still here if you want to use it elsewhere
 
 # -------------------------
 # Flask server (keeps Render alive)
@@ -103,7 +103,7 @@ async def get_or_create_webhook(channel: discord.TextChannel) -> discord.Webhook
 
 
 # -------------------------
-# File Fixer Engine (JSON + XML)
+# File Fixer Engine (JSON + upgraded XML)
 # -------------------------
 
 def fix_json(text):
@@ -119,17 +119,47 @@ def fix_json(text):
             return f"JSON Fixer Error: {e}"
 
 def fix_xml(text):
-    try:
-        root = ET.fromstring(text)
-        return ET.tostring(root, encoding="unicode")
-    except:
-        try:
-            cleaned = text.replace("&", "&amp;")
-            cleaned = cleaned.replace("﻿", "")
-            root = ET.fromstring(cleaned)
-            return ET.tostring(root, encoding="unicode")
-        except Exception as e:
-            return f"XML Fixer Error: {e}"
+    lines = text.splitlines()
+    fixed_lines = []
+    tag_stack = []
+
+    for line in lines:
+        stripped = line.strip()
+
+        # Keep empty lines as-is
+        if not stripped:
+            fixed_lines.append(line)
+            continue
+
+        # Fix illegal characters
+        stripped = stripped.replace("&", "&amp;")
+
+        # Detect opening tags
+        if stripped.startswith("<") and not stripped.startswith("</") and ">" in stripped:
+            tag = stripped.split(">")[0].replace("<", "").replace("/", "").strip()
+            if " " in tag:
+                tag = tag.split(" ")[0]
+            if tag:
+                tag_stack.append(tag)
+
+        # Detect closing tags
+        if stripped.startswith("</"):
+            tag = stripped.replace("</", "").replace(">", "").strip()
+            if tag_stack and tag_stack[-1] == tag:
+                tag_stack.pop()
+            else:
+                # Auto-fix mismatched closing tags
+                if tag_stack:
+                    stripped = f"</{tag_stack[-1]}>"
+                    tag_stack.pop()
+
+        fixed_lines.append(stripped)
+
+    # Auto-close any remaining tags
+    while tag_stack:
+        fixed_lines.append(f"</{tag_stack.pop()}>")
+
+    return "\n".join(fixed_lines)
 
 
 # -------------------------
@@ -185,10 +215,6 @@ async def filter_info(ctx: commands.Context):
         + "\n".join([f"- {bad} → {funny}" for bad, funny in PROFANITY_MAP.items()])
     )
 
-
-# -------------------------
-# File Upload Fixer Command
-# -------------------------
 
 @bot.command(name="fixupload")
 async def fixupload(ctx):
