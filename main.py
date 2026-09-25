@@ -109,7 +109,7 @@ async def call_ai_repair_engine(content: str) -> str:
     url = "https://openrouter.ai/api/v1/chat/completions"
 
     payload = {
-        "model": "qwen/qwen-2-7b-instruct",  # free model
+        "model": "mistral/mistral-7b-instruct",  # FREE + WORKING
         "messages": [
             {
                 "role": "system",
@@ -139,6 +139,7 @@ async def call_ai_repair_engine(content: str) -> str:
         return response.json()["choices"][0]["message"]["content"]
     except Exception:
         return "AI ERROR:\n" + response.text
+
 
 
 
