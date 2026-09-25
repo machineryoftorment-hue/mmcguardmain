@@ -29,7 +29,7 @@ def repair_file_with_ai(content: str) -> str:
         "Authorization": f"Bearer {GROQ_API_KEY}"
     }
     data = {
-        "model": "llama3-70b-8192",
+        "model": "llama-3.1-70b-versatile",
         "messages": [
             {
                 "role": "system",
