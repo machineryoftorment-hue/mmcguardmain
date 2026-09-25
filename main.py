@@ -98,46 +98,36 @@ async def get_or_create_webhook(channel: discord.TextChannel) -> discord.Webhook
             return hook
     return await channel.create_webhook(name="MMCGuardFilter")
 # -------------------------
-# Groq AI Repair Engine
+# HF AI Repair Engine
 # -------------------------
 
 async def call_ai_repair_engine(content: str) -> str:
-    api_key = os.getenv("DEEPSEEK_API_KEY")
+    api_key = os.getenv("HF_API_KEY")
     if not api_key:
-        return "ERROR: DEEPSEEK_API_KEY is not set."
+        return "ERROR: HF_API_KEY is not set."
 
-    url = "https://api.deepseek.com/v1/chat/completions"
-
-    payload = {
-        "model": "deepseek-chat",
-        "messages": [
-            {
-                "role": "system",
-                "content": (
-                    "You are an expert JSON/XML repair engine. "
-                    "Fix malformed JSON or XML while preserving ALL values. "
-                    "Do not invent new values. "
-                    "Do not remove objects. "
-                    "Return ONLY the corrected file with no explanation."
-                )
-            },
-            {
-                "role": "user",
-                "content": content
-            }
-        ],
-        "temperature": 0
-    }
+    url = "https://api-inference.huggingface.co/models/Qwen/Qwen2.5-7B-Instruct"
 
     headers = {
         "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json"
     }
 
-    response = requests.post(url, json=payload, headers=headers)
+    payload = {
+        "inputs": (
+            "You are an expert JSON/XML repair engine.\n"
+            "Fix the following malformed JSON or XML while preserving ALL values.\n"
+            "Do not invent new values.\n"
+            "Do not remove objects.\n"
+            "Return ONLY the corrected file.\n\n"
+            f"{content}"
+        )
+    }
+
+    response = requests.post(url, headers=headers, json=payload)
 
     try:
-        return response.json()["choices"][0]["message"]["content"]
+        return response.json()[0]["generated_text"]
     except Exception:
         return "AI ERROR:\n" + response.text
 
