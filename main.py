@@ -102,43 +102,54 @@ async def get_or_create_webhook(channel: discord.TextChannel) -> discord.Webhook
 # -------------------------
 
 async def call_ai_repair_engine(content: str) -> str:
-    api_key = os.getenv("OPENROUTER_API_KEY")
+    api_key = os.getenv("REPLICATE_API_KEY")
     if not api_key:
-        return "ERROR: OPENROUTER_API_KEY is not set."
+        return "ERROR: REPLICATE_API_KEY is not set."
 
-    url = "https://openrouter.ai/api/v1/chat/completions"
+    url = "https://api.replicate.com/v1/models/meta/meta-llama-3-8b-instruct/predictions"
 
     payload = {
-        "model": "mistralai/mistral-7b-instruct",  # VALID + FREE + WORKING
-        "messages": [
-            {
-                "role": "system",
-                "content": (
-                    "You are an expert JSON/XML repair engine. "
-                    "Fix malformed JSON or XML while preserving ALL values. "
-                    "Do not invent new values. "
-                    "Do not remove objects. "
-                    "Return ONLY the corrected file with no explanation."
-                )
-            },
-            {"role": "user", "content": content}
-        ],
-        "temperature": 0
+        "input": {
+            "prompt": (
+                "You are an expert JSON/XML repair engine.\n"
+                "Fix the following malformed JSON or XML while preserving ALL values.\n"
+                "Do not invent new values.\n"
+                "Do not remove objects.\n"
+                "Return ONLY the corrected file.\n\n"
+                f"{content}"
+            )
+        }
     }
 
     headers = {
-        "Authorization": f"Bearer {api_key}",
-        "HTTP-Referer": "https://yourdomain.com",
-        "X-Title": "DiscordBot",
+        "Authorization": f"Token {api_key}",
         "Content-Type": "application/json"
     }
 
     response = requests.post(url, json=payload, headers=headers)
 
     try:
-        return response.json()["choices"][0]["message"]["content"]
+        data = response.json()
+        prediction_id = data["id"]
+
+        # Poll until the prediction is complete
+        while True:
+            poll = requests.get(
+                f"https://api.replicate.com/v1/predictions/{prediction_id}",
+                headers=headers
+            ).json()
+
+            if poll["status"] == "succeeded":
+                return poll["output"][0]
+
+            if poll["status"] == "failed":
+                return "AI ERROR:\n" + str(poll)
+
+            await asyncio.sleep(1)
+
     except Exception:
         return "AI ERROR:\n" + response.text
+
 
 
 
