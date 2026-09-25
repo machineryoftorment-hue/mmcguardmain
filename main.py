@@ -96,8 +96,6 @@ async def get_or_create_webhook(channel: discord.TextChannel) -> discord.Webhook
         if hook.name == "MMCGuardFilter":
             return hook
     return await channel.create_webhook(name="MMCGuardFilter")
-
-
 # -------------------------
 # Commands
 # -------------------------
@@ -164,7 +162,7 @@ async def validate(ctx):
 
 
 # -------------------------
-# !fixai — Trained Aggressive AI Repair + Summary
+# !fixai — Aggressive AI Repair (C1 + D2)
 # -------------------------
 
 @bot.command(name="fixai")
@@ -192,7 +190,7 @@ async def fixai(ctx):
     }
 
     # -------------------------
-    # JSON MODEL (patched)
+    # JSON MODEL — Aggressive Mode (C1 + D2)
     # -------------------------
 
     def repair_json(tokens):
@@ -218,9 +216,9 @@ async def fixai(ctx):
         try:
             data = json.loads(repaired)
         except Exception:
-            # Soft fallback: keep structure instead of nuking
+            # Aggressive fallback: return structurally repaired text
             summary["objects_rebuilt"] += 1
-            return repaired  # return structurally fixed JSON text
+            return repaired
 
         # If parsed, enforce required fields
         if "Objects" not in data or not isinstance(data["Objects"], list):
@@ -252,7 +250,7 @@ async def fixai(ctx):
         return json.dumps({"Objects": fixed_objects}, indent=4)
 
     # -------------------------
-    # XML MODEL
+    # XML MODEL — Aggressive Mode
     # -------------------------
 
     def repair_xml(tokens):
@@ -329,8 +327,6 @@ async def fixai(ctx):
         content="Here is your AI‑repaired file:",
         file=discord.File(filename)
     )
-
-
 # -------------------------
 # Events
 # -------------------------
@@ -349,18 +345,22 @@ async def on_message(message: discord.Message):
     original = message.content
     cleaned = replace_profanity(original)
 
+    # If no profanity detected, process commands normally
     if cleaned == original:
         await bot.process_commands(message)
         return
 
+    # Try deleting the original message
     try:
         await message.delete()
     except discord.Forbidden:
+        # If bot lacks permission, fallback to sending cleaned message
         await message.channel.send(
             f"🧼 **Cleaned message from {message.author.mention}:**\n{cleaned}"
         )
         return
 
+    # Send cleaned message via webhook
     webhook = await get_or_create_webhook(message.channel)
 
     await webhook.send(
