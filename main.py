@@ -102,22 +102,30 @@ async def get_or_create_webhook(channel: discord.TextChannel) -> discord.Webhook
 # -------------------------
 
 async def call_ai_repair_engine(content: str) -> str:
-    api_key = os.getenv("GROQ_API_KEY")
+    api_key = os.getenv("DEEPSEEK_API_KEY")
     if not api_key:
-        return "ERROR: GROQ_API_KEY is not set."
+        return "ERROR: DEEPSEEK_API_KEY is not set."
 
-    url = "https://api.groq.com/openai/v1/completions"
+    url = "https://api.deepseek.com/v1/chat/completions"
 
     payload = {
-        "model": "llama-3.1-8b-instant",
-        "prompt": (
-            "You are an expert JSON/XML repair engine.\n"
-            "Fix the following malformed JSON or XML while preserving ALL values.\n"
-            "Do not invent new values.\n"
-            "Do not remove objects.\n"
-            "Return ONLY the corrected file.\n\n"
-            f"{content}"
-        ),
+        "model": "deepseek-chat",
+        "messages": [
+            {
+                "role": "system",
+                "content": (
+                    "You are an expert JSON/XML repair engine. "
+                    "Fix malformed JSON or XML while preserving ALL values. "
+                    "Do not invent new values. "
+                    "Do not remove objects. "
+                    "Return ONLY the corrected file with no explanation."
+                )
+            },
+            {
+                "role": "user",
+                "content": content
+            }
+        ],
         "temperature": 0
     }
 
@@ -129,9 +137,10 @@ async def call_ai_repair_engine(content: str) -> str:
     response = requests.post(url, json=payload, headers=headers)
 
     try:
-        return response.json()["choices"][0]["text"]
+        return response.json()["choices"][0]["message"]["content"]
     except Exception:
         return "AI ERROR:\n" + response.text
+
 
 # -------------------------
 # Commands
