@@ -20,5 +20,5 @@ RUN pip install -r requirements.txt
 EXPOSE 11434
 EXPOSE 8080
 
-# Start Ollama, wait, start health server, then start bot
-CMD bash -c "ollama serve & sleep 10 && python3 health.py & python3 main.py"
+# Start Ollama, wait, then run bot (health server starts inside main.py)
+CMD bash -c "ollama serve & sleep 10 && python3 main.py"
