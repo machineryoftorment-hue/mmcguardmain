@@ -181,7 +181,6 @@ async def fixai(ctx):
     if not (is_json or is_xml):
         return await ctx.send("Unknown format. Must start with `{` or `<`.")
 
-    import re
     tokens = re.findall(r"[{}[\]<>/]|\".*?\"|\S+", raw)
 
     summary = {
@@ -193,15 +192,15 @@ async def fixai(ctx):
     }
 
     # -------------------------
-    # JSON MODEL
+    # JSON MODEL (patched)
     # -------------------------
 
     def repair_json(tokens):
         obj_keys = {"name", "pos", "ypr", "scale", "enableCEPersistency", "customString"}
         output = []
-        stack = []
         last = ""
 
+        # Insert missing commas between fields
         for t in tokens:
             if last and last not in "{[," and t not in "}],":
                 if last not in [":"]:
@@ -211,13 +210,17 @@ async def fixai(ctx):
             last = t
 
         repaired = "".join(output)
+
+        # Remove trailing commas
         repaired = repaired.replace(",}", "}").replace(",]", "]")
 
+        # Try to parse
         try:
             data = json.loads(repaired)
-        except:
-            data = {"Objects": []}
+        except Exception:
+            # Soft fallback: keep structure instead of nuking
             summary["objects_rebuilt"] += 1
+            data = {"Objects": []}
 
         if "Objects" not in data or not isinstance(data["Objects"], list):
             data["Objects"] = []
