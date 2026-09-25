@@ -101,34 +101,25 @@ async def get_or_create_webhook(channel: discord.TextChannel) -> discord.Webhook
 # Groq AI Repair Engine
 # -------------------------
 
-async def call_ai_repair_engine(content: str) -> str:
+asasync def call_ai_repair_engine(content: str) -> str:
     api_key = os.getenv("GROQ_API_KEY")
     if not api_key:
-        return "ERROR: GROQ_API_KEY is not set in Render."
+        return "ERROR: GROQ_API_KEY is not set."
 
-    url = "https://api.groq.com/openai/v1/chat/completions"
+    url = "https://api.groq.com/openai/v1/completions"
 
     payload = {
-    "model": "gemma2-9b-it",
-    "messages": [
-        {
-            "role": "system",
-            "content": (
-                "You are an expert JSON/XML repair engine. "
-                "Your job is to fix malformed JSON or XML while preserving ALL values. "
-                "Do not invent new values. Do not remove objects. "
-                "Do not reorder objects unless absolutely required. "
-                "Return ONLY the corrected file with no explanation."
-            )
-        },
-        {
-            "role": "user",
-            "content": content
-        }
-    ],
-    "temperature": 0
-}
-
+        "model": "llama-3.1-8b-instant",
+        "prompt": (
+            "You are an expert JSON/XML repair engine.\n"
+            "Fix the following malformed JSON or XML while preserving ALL values.\n"
+            "Do not invent new values.\n"
+            "Do not remove objects.\n"
+            "Return ONLY the corrected file.\n\n"
+            f"{content}"
+        ),
+        "temperature": 0
+    }
 
     headers = {
         "Authorization": f"Bearer {api_key}",
@@ -138,10 +129,9 @@ async def call_ai_repair_engine(content: str) -> str:
     response = requests.post(url, json=payload, headers=headers)
 
     try:
-        return response.json()["choices"][0]["message"]["content"]
+        return response.json()["choices"][0]["text"]
     except Exception:
         return "AI ERROR:\n" + response.text
-
 
 # -------------------------
 # Commands
