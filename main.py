@@ -161,11 +161,12 @@ async def fixai(ctx: commands.Context):
     except Exception:
         await ctx.send("AI repaired content:\n```text\n" + fixed[:1900] + "\n```")
 # ============================
-# HEALTH CHECK SERVER FOR RENDER
+# 4. BOT + HEALTH SERVER START
 # ============================
 
 from flask import Flask
 import threading
+import os
 
 app = Flask(__name__)
 
@@ -173,16 +174,15 @@ app = Flask(__name__)
 def home():
     return "MMC Guard is running"
 
-def start_health_server():
-    # Render needs a port to bind to
-    app.run(host="0.0.0.0", port=8080)
-
-# ============================
-# 4. BOT START
-# ============================
-
-if __name__ == "__main__":
+def start_bot():
     if not BOT_TOKEN:
         print("ERROR: DISCORD_BOT_TOKEN is not set.")
     else:
         bot.run(BOT_TOKEN)
+
+# Start Discord bot in background
+threading.Thread(target=start_bot, daemon=True).start()
+
+# Start Flask health server in FOREGROUND
+app.run(host="0.0.0.0", port=8080)
+
