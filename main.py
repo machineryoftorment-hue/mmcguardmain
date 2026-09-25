@@ -5,6 +5,10 @@ import requests
 from flask import Flask
 import threading
 
+# ============================
+# Flask Web Server (for Render)
+# ============================
+
 app = Flask(__name__)
 
 @app.route("/")
@@ -12,8 +16,13 @@ def home():
     return "Bot is running!"
 
 def run_flask():
+    # Render will detect this port
     app.run(host="0.0.0.0", port=10000)
 
+
+# ============================
+# Discord Bot Setup
+# ============================
 
 BOT_TOKEN = os.getenv("DISCORD_BOT_TOKEN")
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
@@ -22,14 +31,21 @@ intents = discord.Intents.default()
 intents.message_content = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 
+
+# ============================
+# Groq AI Repair Function
+# ============================
+
 def repair_file_with_ai(content: str) -> str:
     url = "https://api.groq.com/openai/v1/chat/completions"
+
     headers = {
         "Content-Type": "application/json",
         "Authorization": f"Bearer {GROQ_API_KEY}"
     }
+
     data = {
-        "model": "llama-3.1-70b-versatile",
+        "model": "llama-3.1-70b-versatile",   # ✔ Correct model name
         "messages": [
             {
                 "role": "system",
@@ -48,10 +64,19 @@ def repair_file_with_ai(content: str) -> str:
         "temperature": 0
     }
 
+    # ✔ MUST be POST, not GET
     resp = requests.post(url, headers=headers, json=data)
+
+    # Raise error if Groq rejects the request
     resp.raise_for_status()
+
     result = resp.json()
     return result["choices"][0]["message"]["content"].strip()
+
+
+# ============================
+# !fixai Command
+# ============================
 
 @bot.command()
 async def fixai(ctx):
@@ -76,6 +101,11 @@ async def fixai(ctx):
 
     out_name = attachment.filename.replace(".", "_fixed.")
     await ctx.send(file=discord.File(buf, out_name))
+
+
+# ============================
+# Start Flask + Discord Bot
+# ============================
 
 threading.Thread(target=run_flask).start()
 bot.run(BOT_TOKEN)
