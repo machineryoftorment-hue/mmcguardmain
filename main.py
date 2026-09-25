@@ -109,25 +109,26 @@ async def call_ai_repair_engine(content: str) -> str:
     url = "https://api.groq.com/openai/v1/chat/completions"
 
     payload = {
-        "model": "llama3-70b-8192",
-        "messages": [
-            {
-                "role": "system",
-                "content": (
-                    "You are an expert JSON/XML repair engine. "
-                    "Your job is to fix malformed JSON or XML while preserving ALL values. "
-                    "Do not invent new values. Do not remove objects. "
-                    "Do not reorder objects unless absolutely required. "
-                    "Return ONLY the corrected file with no explanation."
-                )
-            },
-            {
-                "role": "user",
-                "content": content
-            }
-        ],
-        "temperature": 0
-    }
+    "model": "llama3-groq-70b-8192",
+    "messages": [
+        {
+            "role": "system",
+            "content": (
+                "You are an expert JSON/XML repair engine. "
+                "Your job is to fix malformed JSON or XML while preserving ALL values. "
+                "Do not invent new values. Do not remove objects. "
+                "Do not reorder objects unless absolutely required. "
+                "Return ONLY the corrected file with no explanation."
+            )
+        },
+        {
+            "role": "user",
+            "content": content
+        }
+    ],
+    "temperature": 0
+}
+
 
     headers = {
         "Authorization": f"Bearer {api_key}",
