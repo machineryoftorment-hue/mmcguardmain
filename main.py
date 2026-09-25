@@ -4,6 +4,8 @@ from discord.ext import commands
 from flask import Flask
 import threading
 import re
+import json
+import xml.etree.ElementTree as ET
 
 # -------------------------
 # Flask server (keeps Render alive)
@@ -54,7 +56,6 @@ PROFANITY_MAP = {
     "cunt": "sea cucumber",
     "c*nt": "sea cucumber",
 
-
     "bullshit": "bullsneeze",
     "bullsh*t": "bullsneeze",
 
@@ -70,21 +71,18 @@ PROFANITY_MAP = {
     "prick": "pinecone",
 }
 
-
 bot = commands.Bot(command_prefix=BOT_PREFIX, intents=INTENTS)
 
 
 # -------------------------
-# Fuzzy profanity replacer (handles repeated letters)
+# Fuzzy profanity replacer
 # -------------------------
 
 def replace_profanity(text: str) -> str:
     cleaned = text
 
     for bad, funny in PROFANITY_MAP.items():
-        # Build fuzzy pattern: each letter can repeat 1+ times
         fuzzy = "".join([f"{re.escape(c)}+" for c in bad])
-
         pattern = re.compile(fuzzy, re.IGNORECASE)
         cleaned = pattern.sub(funny, cleaned)
 
@@ -105,6 +103,36 @@ async def get_or_create_webhook(channel: discord.TextChannel) -> discord.Webhook
 
 
 # -------------------------
+# File Fixer Engine (JSON + XML)
+# -------------------------
+
+def fix_json(text):
+    try:
+        return json.dumps(json.loads(text), indent=4)
+    except:
+        try:
+            text = text.replace(",]", "]")
+            text = text.replace(",}", "}")
+            text = text.replace("\n", "")
+            return json.dumps(json.loads(text), indent=4)
+        except Exception as e:
+            return f"JSON Fixer Error: {e}"
+
+def fix_xml(text):
+    try:
+        root = ET.fromstring(text)
+        return ET.tostring(root, encoding="unicode")
+    except:
+        try:
+            cleaned = text.replace("&", "&amp;")
+            cleaned = cleaned.replace("﻿", "")
+            root = ET.fromstring(cleaned)
+            return ET.tostring(root, encoding="unicode")
+        except Exception as e:
+            return f"XML Fixer Error: {e}"
+
+
+# -------------------------
 # Events
 # -------------------------
 
@@ -122,12 +150,10 @@ async def on_message(message: discord.Message):
     original = message.content
     cleaned = replace_profanity(original)
 
-    # If nothing changed, do nothing
     if cleaned == original:
         await bot.process_commands(message)
         return
 
-    # Delete original message
     try:
         await message.delete()
     except discord.Forbidden:
@@ -136,7 +162,6 @@ async def on_message(message: discord.Message):
         )
         return
 
-    # Send cleaned message as webhook
     webhook = await get_or_create_webhook(message.channel)
 
     await webhook.send(
@@ -158,6 +183,37 @@ async def filter_info(ctx: commands.Context):
         "I replace spicy words with dumb funny ones.\n"
         "Current map:\n"
         + "\n".join([f"- {bad} → {funny}" for bad, funny in PROFANITY_MAP.items()])
+    )
+
+
+# -------------------------
+# File Upload Fixer Command
+# -------------------------
+
+@bot.command(name="fixupload")
+async def fixupload(ctx):
+    if not ctx.message.attachments:
+        return await ctx.send("Please upload a file with the command.")
+
+    attachment = ctx.message.attachments[0]
+    file_bytes = await attachment.read()
+    content = file_bytes.decode("utf-8", errors="ignore")
+
+    if content.strip().startswith("{"):
+        fixed = fix_json(content)
+        filename = "fixed.json"
+    elif content.strip().startswith("<"):
+        fixed = fix_xml(content)
+        filename = "fixed.xml"
+    else:
+        return await ctx.send("Unknown format. File must start with `{` for JSON or `<` for XML`.")
+
+    with open(filename, "w", encoding="utf-8") as f:
+        f.write(fixed)
+
+    await ctx.send(
+        content="Here is your fixed file:",
+        file=discord.File(filename)
     )
 
 
