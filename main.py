@@ -101,7 +101,7 @@ async def get_or_create_webhook(channel: discord.TextChannel) -> discord.Webhook
 # Groq AI Repair Engine
 # -------------------------
 
-asasync def call_ai_repair_engine(content: str) -> str:
+async def call_ai_repair_engine(content: str) -> str:
     api_key = os.getenv("GROQ_API_KEY")
     if not api_key:
         return "ERROR: GROQ_API_KEY is not set."
