@@ -103,56 +103,65 @@ async def get_or_create_webhook(channel: discord.TextChannel) -> discord.Webhook
 # -------------------------
 # MAX SAFE POWER JSON FIXER
 # -------------------------
-
 def fix_json(text):
     original = text
 
-    # First attempt: strict load
+    # Try strict load first
     try:
         json.loads(text)
-        return text  # Already valid, preserve indentation
+        return text  # Already valid
     except:
         pass
 
-    # Safe comma insertion rules
-    def insert_commas(t):
-        out = []
-        i = 0
-        length = len(t)
+    # -------------------------
+    # FORCE REPAIR MODE
+    # -------------------------
 
-        while i < length:
-            out.append(t[i])
-
-            # Insert comma between JSON fields when required
-            if t[i] in ['"', '}', ']']:
-                # Look ahead safely
-                j = i + 1
-                while j < length and t[j] in [' ', '\n', '\t']:
-                    j += 1
-
-                # If next non-space char starts a new field or object/array
-                if j < length and t[j] in ['"', '{', '[']:
-                    # Only insert if missing
-                    if t[i] != ',':
-                        out.append(',')
-
-            i += 1
-
-        return "".join(out)
-
-    # Apply safe comma insertion
-    text = insert_commas(text)
-
-    # Remove trailing commas safely
+    # Step 1: Remove illegal trailing commas
     text = text.replace(",]", "]")
     text = text.replace(",}", "}")
 
-    # Try loading again
+    # Step 2: Ensure all colons are followed by valid JSON separators
+    repaired = []
+    i = 0
+    while i < len(text):
+        repaired.append(text[i])
+
+        # If we see a number, string, or closing brace/bracket
+        if text[i] in ['"', '}', ']', '0','1','2','3','4','5','6','7','8','9']:
+            # Look ahead
+            j = i + 1
+            while j < len(text) and text[j] in [' ', '\n', '\t']:
+                j += 1
+
+            # If next non-space char starts a new field or array element
+            if j < len(text) and text[j] in ['"', '{', '['] and text[i] != ',':
+                repaired.append(',')
+
+        i += 1
+
+    text = "".join(repaired)
+
+    # Step 3: Try loading again
     try:
         json.loads(text)
-        return text  # Preserve indentation
+        return text
+    except:
+        pass
+
+    # Step 4: Nuclear option — rebuild structure safely
+    try:
+        # Remove all control characters except JSON syntax
+        safe = re.sub(r"[^\x20-\x7E]", "", text)
+
+        # Remove any duplicated commas
+        safe = safe.replace(",,", ",")
+
+        # Try again
+        json.loads(safe)
+        return safe
     except Exception as e:
-        return f"❌ Cannot safely fix JSON without assumptions.\n{e}"
+        return f"❌ JSON too corrupted to force‑repair:\n{e}"
 
 
 # -------------------------
@@ -164,55 +173,84 @@ def fix_xml(text):
     fixed_lines = []
     tag_stack = []
 
+    # -------------------------
+    # PASS 1 — CLEAN + NORMALIZE
+    # -------------------------
+
     for line in lines:
-        stripped = line.rstrip()  # preserve indentation, remove trailing spaces only
+        raw = line.rstrip()  # preserve indentation, remove trailing spaces only
 
         # Preserve blank lines
-        if stripped.strip() == "":
+        if raw.strip() == "":
             fixed_lines.append(line)
             continue
 
         # Preserve comments exactly
-        if stripped.strip().startswith("<!--"):
+        if raw.strip().startswith("<!--"):
             fixed_lines.append(line)
             continue
 
-        # Escape illegal characters
-        safe_line = stripped.replace("&", "&amp;")
+        safe = raw.replace("&", "&amp;")
 
-        # Detect invalid closing tags like </!-->
-        if safe_line.strip().startswith("</"):
-            tagname = safe_line.strip()[2:].split(">")[0]
-
-            # If tagname contains non-alpha characters, skip
+        # Remove invalid closing tags like </!-->
+        if safe.strip().startswith("</"):
+            tagname = safe.strip()[2:].split(">")[0]
             if not tagname.isalpha():
                 continue
 
-        # Opening tag detection
-        if safe_line.strip().startswith("<") and not safe_line.strip().startswith("</"):
-            if ">" in safe_line:
-                tag = safe_line.strip().split(">")[0].replace("<", "").replace("/", "").split(" ")[0]
+        fixed_lines.append(safe)
+
+    # -------------------------
+    # PASS 2 — FORCE STRUCTURE REPAIR
+    # -------------------------
+
+    repaired = []
+    tag_stack = []
+
+    for line in fixed_lines:
+        stripped = line.strip()
+
+        # Skip blank lines and comments
+        if stripped == "" or stripped.startswith("<!--"):
+            repaired.append(line)
+            continue
+
+        # Opening tag
+        if stripped.startswith("<") and not stripped.startswith("</"):
+            if ">" in stripped:
+                tag = stripped.split(">")[0].replace("<", "").replace("/", "").split(" ")[0]
                 if tag:
                     tag_stack.append(tag)
+            repaired.append(line)
+            continue
 
-        # Closing tag detection
-        if safe_line.strip().startswith("</"):
-            tag = safe_line.strip().replace("</", "").replace(">", "").strip()
+        # Closing tag
+        if stripped.startswith("</"):
+            tag = stripped.replace("</", "").replace(">", "").strip()
 
-            # If tag matches the last opened tag, close it
+            # If correct closing tag
             if tag_stack and tag_stack[-1] == tag:
                 tag_stack.pop()
-            else:
-                # Skip mismatched closing tags
+                repaired.append(line)
                 continue
 
-        fixed_lines.append(line)
+            # FORCE‑REPAIR: auto-close mismatched tags
+            if tag_stack:
+                repaired.append(f"</{tag_stack[-1]}>")
+                tag_stack.pop()
+            continue
 
-    # Auto-close remaining tags (safe)
+        # Normal content line
+        repaired.append(line)
+
+    # -------------------------
+    # PASS 3 — AUTO-CLOSE REMAINING TAGS
+    # -------------------------
+
     while tag_stack:
-        fixed_lines.append(f"</{tag_stack.pop()}>")
+        repaired.append(f"</{tag_stack.pop()}>")
 
-    return "\n".join(fixed_lines)
+    return "\n".join(repaired)
 
 
 # -------------------------
