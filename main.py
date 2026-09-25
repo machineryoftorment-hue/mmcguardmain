@@ -101,24 +101,62 @@ async def get_or_create_webhook(channel: discord.TextChannel) -> discord.Webhook
 
 
 # -------------------------
-# JSON Fixer
+# MAX SAFE POWER JSON FIXER
 # -------------------------
 
 def fix_json(text):
+    original = text
+
+    # First attempt: strict load
     try:
-        return json.dumps(json.loads(text), indent=4)
+        json.loads(text)
+        return text  # Already valid, preserve indentation
     except:
-        try:
-            text = text.replace(",]", "]")
-            text = text.replace(",}", "}")
-            text = text.replace("\n", "")
-            return json.dumps(json.loads(text), indent=4)
-        except Exception as e:
-            return f"JSON Fixer Error: {e}"
+        pass
+
+    # Safe comma insertion rules
+    def insert_commas(t):
+        out = []
+        i = 0
+        length = len(t)
+
+        while i < length:
+            out.append(t[i])
+
+            # Insert comma between JSON fields when required
+            if t[i] in ['"', '}', ']']:
+                # Look ahead safely
+                j = i + 1
+                while j < length and t[j] in [' ', '\n', '\t']:
+                    j += 1
+
+                # If next non-space char starts a new field or object/array
+                if j < length and t[j] in ['"', '{', '[']:
+                    # Only insert if missing
+                    if t[i] != ',':
+                        out.append(',')
+
+            i += 1
+
+        return "".join(out)
+
+    # Apply safe comma insertion
+    text = insert_commas(text)
+
+    # Remove trailing commas safely
+    text = text.replace(",]", "]")
+    text = text.replace(",}", "}")
+
+    # Try loading again
+    try:
+        json.loads(text)
+        return text  # Preserve indentation
+    except Exception as e:
+        return f"❌ Cannot safely fix JSON without assumptions.\n{e}"
 
 
 # -------------------------
-# SMART CLEAN XML FIXER
+# MAX SAFE POWER XML FIXER
 # -------------------------
 
 def fix_xml(text):
@@ -127,37 +165,50 @@ def fix_xml(text):
     tag_stack = []
 
     for line in lines:
-        stripped = line.strip()
+        stripped = line.rstrip()  # preserve indentation, remove trailing spaces only
 
-        if not stripped:
+        # Preserve blank lines
+        if stripped.strip() == "":
             fixed_lines.append(line)
             continue
 
-        stripped = stripped.replace("&", "&amp;")
-
-        # Remove invalid closing tags like </!-->
-        if stripped.startswith("</") and not stripped[2:].split(">")[0].isalpha():
+        # Preserve comments exactly
+        if stripped.strip().startswith("<!--"):
+            fixed_lines.append(line)
             continue
 
-        # Opening tag
-        if stripped.startswith("<") and not stripped.startswith("</") and ">" in stripped:
-            tag = stripped.split(">")[0].replace("<", "").replace("/", "").strip()
-            if " " in tag:
-                tag = tag.split(" ")[0]
-            if tag:
-                tag_stack.append(tag)
+        # Escape illegal characters
+        safe_line = stripped.replace("&", "&amp;")
 
-        # Closing tag
-        if stripped.startswith("</"):
-            tag = stripped.replace("</", "").replace(">", "").strip()
+        # Detect invalid closing tags like </!-->
+        if safe_line.strip().startswith("</"):
+            tagname = safe_line.strip()[2:].split(">")[0]
 
+            # If tagname contains non-alpha characters, skip
+            if not tagname.isalpha():
+                continue
+
+        # Opening tag detection
+        if safe_line.strip().startswith("<") and not safe_line.strip().startswith("</"):
+            if ">" in safe_line:
+                tag = safe_line.strip().split(">")[0].replace("<", "").replace("/", "").split(" ")[0]
+                if tag:
+                    tag_stack.append(tag)
+
+        # Closing tag detection
+        if safe_line.strip().startswith("</"):
+            tag = safe_line.strip().replace("</", "").replace(">", "").strip()
+
+            # If tag matches the last opened tag, close it
             if tag_stack and tag_stack[-1] == tag:
                 tag_stack.pop()
             else:
+                # Skip mismatched closing tags
                 continue
 
-        fixed_lines.append(stripped)
+        fixed_lines.append(line)
 
+    # Auto-close remaining tags (safe)
     while tag_stack:
         fixed_lines.append(f"</{tag_stack.pop()}>")
 
@@ -283,12 +334,16 @@ async def fixupload(ctx):
     file_bytes = await attachment.read()
     content = file_bytes.decode("utf-8", errors="ignore")
 
+    # JSON
     if content.strip().startswith("{"):
         fixed = fix_json(content)
         filename = "fixed.json"
+
+    # XML
     elif content.strip().startswith("<"):
         fixed = fix_xml(content)
         filename = "fixed.xml"
+
     else:
         return await ctx.send("Unknown format. File must start with `{` for JSON or `<` for XML`.")
 
@@ -373,5 +428,8 @@ if __name__ == "__main__":
     if not TOKEN:
         raise RuntimeError("Set DISCORD_BOT_TOKEN env var or hardcode your token.")
 
+    # Keep Render alive
     threading.Thread(target=run_flask).start()
+
+    # Start Discord bot
     bot.run(TOKEN)
