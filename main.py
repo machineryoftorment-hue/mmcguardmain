@@ -5,8 +5,6 @@ from flask import Flask
 import threading
 import re
 import json
-import zipfile
-import tempfile
 
 # -------------------------
 # Flask server (keeps Render alive)
@@ -101,200 +99,6 @@ async def get_or_create_webhook(channel: discord.TextChannel) -> discord.Webhook
 
 
 # -------------------------
-# MAX SAFE POWER JSON FIXER
-# -------------------------
-def fix_json(text):
-    original = text
-
-    # Try strict load first
-    try:
-        json.loads(text)
-        return text  # Already valid
-    except:
-        pass
-
-    # -------------------------
-    # FORCE REPAIR MODE
-    # -------------------------
-
-    # Step 1: Remove illegal trailing commas
-    text = text.replace(",]", "]")
-    text = text.replace(",}", "}")
-
-    # Step 2: Ensure all colons are followed by valid JSON separators
-    repaired = []
-    i = 0
-    while i < len(text):
-        repaired.append(text[i])
-
-        # If we see a number, string, or closing brace/bracket
-        if text[i] in ['"', '}', ']', '0','1','2','3','4','5','6','7','8','9']:
-            # Look ahead
-            j = i + 1
-            while j < len(text) and text[j] in [' ', '\n', '\t']:
-                j += 1
-
-            # If next non-space char starts a new field or array element
-            if j < len(text) and text[j] in ['"', '{', '['] and text[i] != ',':
-                repaired.append(',')
-
-        i += 1
-
-    text = "".join(repaired)
-
-    # Step 3: Try loading again
-    try:
-        json.loads(text)
-        return text
-    except:
-        pass
-
-    # Step 4: Nuclear option — rebuild structure safely
-    try:
-        # Remove all control characters except JSON syntax
-        safe = re.sub(r"[^\x20-\x7E]", "", text)
-
-        # Remove any duplicated commas
-        safe = safe.replace(",,", ",")
-
-        # Try again
-        json.loads(safe)
-        return safe
-    except Exception as e:
-        return f"❌ JSON too corrupted to force‑repair:\n{e}"
-
-
-# -------------------------
-# MAX SAFE POWER XML FIXER
-# -------------------------
-
-def fix_xml(text):
-    lines = text.splitlines()
-    fixed_lines = []
-    tag_stack = []
-
-    # -------------------------
-    # PASS 1 — CLEAN + NORMALIZE
-    # -------------------------
-
-    for line in lines:
-        raw = line.rstrip()  # preserve indentation, remove trailing spaces only
-
-        # Preserve blank lines
-        if raw.strip() == "":
-            fixed_lines.append(line)
-            continue
-
-        # Preserve comments exactly
-        if raw.strip().startswith("<!--"):
-            fixed_lines.append(line)
-            continue
-
-        safe = raw.replace("&", "&amp;")
-
-        # Remove invalid closing tags like </!-->
-        if safe.strip().startswith("</"):
-            tagname = safe.strip()[2:].split(">")[0]
-            if not tagname.isalpha():
-                continue
-
-        fixed_lines.append(safe)
-
-    # -------------------------
-    # PASS 2 — FORCE STRUCTURE REPAIR
-    # -------------------------
-
-    repaired = []
-    tag_stack = []
-
-    for line in fixed_lines:
-        stripped = line.strip()
-
-        # Skip blank lines and comments
-        if stripped == "" or stripped.startswith("<!--"):
-            repaired.append(line)
-            continue
-
-        # Opening tag
-        if stripped.startswith("<") and not stripped.startswith("</"):
-            if ">" in stripped:
-                tag = stripped.split(">")[0].replace("<", "").replace("/", "").split(" ")[0]
-                if tag:
-                    tag_stack.append(tag)
-            repaired.append(line)
-            continue
-
-        # Closing tag
-        if stripped.startswith("</"):
-            tag = stripped.replace("</", "").replace(">", "").strip()
-
-            # If correct closing tag
-            if tag_stack and tag_stack[-1] == tag:
-                tag_stack.pop()
-                repaired.append(line)
-                continue
-
-            # FORCE‑REPAIR: auto-close mismatched tags
-            if tag_stack:
-                repaired.append(f"</{tag_stack[-1]}>")
-                tag_stack.pop()
-            continue
-
-        # Normal content line
-        repaired.append(line)
-
-    # -------------------------
-    # PASS 3 — AUTO-CLOSE REMAINING TAGS
-    # -------------------------
-
-    while tag_stack:
-        repaired.append(f"</{tag_stack.pop()}>")
-
-    return "\n".join(repaired)
-
-
-# -------------------------
-# Events
-# -------------------------
-
-@bot.event
-async def on_ready():
-    print(f"Logged in as {bot.user} (ID: {bot.user.id})")
-    print("Fuzzy profanity → funny webhook replacer is online.")
-
-
-@bot.event
-async def on_message(message: discord.Message):
-    if message.author.bot:
-        return
-
-    original = message.content
-    cleaned = replace_profanity(original)
-
-    if cleaned == original:
-        await bot.process_commands(message)
-        return
-
-    try:
-        await message.delete()
-    except discord.Forbidden:
-        await message.channel.send(
-            f"🧼 **Cleaned message from {message.author.mention}:**\n{cleaned}"
-        )
-        return
-
-    webhook = await get_or_create_webhook(message.channel)
-
-    await webhook.send(
-        content=cleaned,
-        username=message.author.display_name,
-        avatar_url=message.author.display_avatar.url,
-    )
-
-    await bot.process_commands(message)
-
-
-# -------------------------
 # Commands
 # -------------------------
 
@@ -360,98 +164,209 @@ async def validate(ctx):
 
 
 # -------------------------
-# !fixupload
+# !fixai — Trained Aggressive AI Repair + Summary
 # -------------------------
 
-@bot.command(name="fixupload")
-async def fixupload(ctx):
+@bot.command(name="fixai")
+async def fixai(ctx):
     if not ctx.message.attachments:
-        return await ctx.send("Please upload a file with the command.")
+        return await ctx.send("Please upload a JSON or XML file with the command.")
 
     attachment = ctx.message.attachments[0]
-    file_bytes = await attachment.read()
-    content = file_bytes.decode("utf-8", errors="ignore")
+    raw = (await attachment.read()).decode("utf-8", errors="ignore").strip()
 
-    # JSON
-    if content.strip().startswith("{"):
-        fixed = fix_json(content)
-        filename = "fixed.json"
+    is_json = raw.startswith("{")
+    is_xml = raw.startswith("<")
 
-    # XML
-    elif content.strip().startswith("<"):
-        fixed = fix_xml(content)
-        filename = "fixed.xml"
+    if not (is_json or is_xml):
+        return await ctx.send("Unknown format. Must start with `{` or `<`.")
 
+    import re
+    tokens = re.findall(r"[{}[\]<>/]|\".*?\"|\S+", raw)
+
+    summary = {
+        "missing_commas": 0,
+        "objects_rebuilt": 0,
+        "fields_added": 0,
+        "tags_closed": 0,
+        "tags_rebuilt": 0
+    }
+
+    # -------------------------
+    # JSON MODEL
+    # -------------------------
+
+    def repair_json(tokens):
+        obj_keys = {"name", "pos", "ypr", "scale", "enableCEPersistency", "customString"}
+        output = []
+        stack = []
+        last = ""
+
+        for t in tokens:
+            if last and last not in "{[," and t not in "}],":
+                if last not in [":"]:
+                    output.append(",")
+                    summary["missing_commas"] += 1
+            output.append(t)
+            last = t
+
+        repaired = "".join(output)
+        repaired = repaired.replace(",}", "}").replace(",]", "]")
+
+        try:
+            data = json.loads(repaired)
+        except:
+            data = {"Objects": []}
+            summary["objects_rebuilt"] += 1
+
+        if "Objects" not in data or not isinstance(data["Objects"], list):
+            data["Objects"] = []
+            summary["objects_rebuilt"] += 1
+
+        fixed_objects = []
+        for obj in data["Objects"]:
+            new = {}
+            for k in obj_keys:
+                if k not in obj:
+                    summary["fields_added"] += 1
+                    if k == "pos":
+                        new[k] = [0.0, 0.0, 0.0]
+                    elif k == "ypr":
+                        new[k] = [0.0, 0.0, 0.0]
+                    elif k == "scale":
+                        new[k] = 1.0
+                    elif k == "enableCEPersistency":
+                        new[k] = 0
+                    elif k == "customString":
+                        new[k] = ""
+                    elif k == "name":
+                        new[k] = "UnknownObject"
+                else:
+                    new[k] = obj[k]
+            fixed_objects.append(new)
+
+        final = json.dumps({"Objects": fixed_objects}, indent=4)
+        return final
+
+    # -------------------------
+    # XML MODEL
+    # -------------------------
+
+    def repair_xml(tokens):
+        valid_tags = {
+            "spawnabletypes", "type", "damage", "hoarder",
+            "cargo", "item", "attachments", "tag"
+        }
+
+        output = []
+        stack = []
+
+        for t in tokens:
+            if t.startswith("<") and not t.startswith("</") and ">" in t:
+                tag = t.replace("<", "").replace(">", "").split()[0]
+                if tag in valid_tags:
+                    stack.append(tag)
+                output.append(t)
+                continue
+
+            if t.startswith("</"):
+                tag = t.replace("</", "").replace(">", "")
+                if stack and stack[-1] == tag:
+                    stack.pop()
+                    output.append(t)
+                else:
+                    if stack:
+                        output.append(f"</{stack[-1]}>")
+                        summary["tags_closed"] += 1
+                        stack.pop()
+                continue
+
+            output.append(t)
+
+        while stack:
+            output.append(f"</{stack.pop()}>")
+            summary["tags_closed"] += 1
+
+        return "".join(output)
+
+    # -------------------------
+    # RUN MODEL
+    # -------------------------
+
+    if is_json:
+        fixed = repair_json(tokens)
+        filename = "fixed_ai.json"
     else:
-        return await ctx.send("Unknown format. File must start with `{` for JSON or `<` for XML`.")
+        fixed = repair_xml(tokens)
+        filename = "fixed_ai.xml"
+
+    # -------------------------
+    # SAVE FILE
+    # -------------------------
 
     with open(filename, "w", encoding="utf-8") as f:
         f.write(fixed)
 
+    # -------------------------
+    # SUMMARY MESSAGE
+    # -------------------------
+
+    summary_msg = (
+        "🧠 **AI Repair Summary**\n"
+        f"- Missing commas fixed: **{summary['missing_commas']}**\n"
+        f"- Objects rebuilt: **{summary['objects_rebuilt']}**\n"
+        f"- Fields added: **{summary['fields_added']}**\n"
+        f"- XML tags auto-closed: **{summary['tags_closed']}**\n"
+        f"- XML tag repairs: **{summary['tags_rebuilt']}**\n"
+    )
+
+    await ctx.send(summary_msg)
+
     await ctx.send(
-        content="Here is your fixed file:",
+        content="Here is your AI‑repaired file:",
         file=discord.File(filename)
     )
 
 
 # -------------------------
-# !fixfolder (ZIP repair)
+# Events
 # -------------------------
 
-@bot.command(name="fixfolder")
-async def fixfolder(ctx):
-    if not ctx.message.attachments:
-        return await ctx.send("Please upload a ZIP file with the command.")
+@bot.event
+async def on_ready():
+    print(f"Logged in as {bot.user} (ID: {bot.user.id})")
+    print("Fuzzy profanity → funny webhook replacer is online.")
 
-    attachment = ctx.message.attachments[0]
 
-    if not attachment.filename.lower().endswith(".zip"):
-        return await ctx.send("Please upload a .zip file.")
+@bot.event
+async def on_message(message: discord.Message):
+    if message.author.bot:
+        return
 
-    temp_dir = tempfile.mkdtemp()
+    original = message.content
+    cleaned = replace_profanity(original)
 
-    zip_path = os.path.join(temp_dir, "input.zip")
-    output_zip_path = os.path.join(temp_dir, "fixed.zip")
+    if cleaned == original:
+        await bot.process_commands(message)
+        return
 
-    with open(zip_path, "wb") as f:
-        f.write(await attachment.read())
+    try:
+        await message.delete()
+    except discord.Forbidden:
+        await message.channel.send(
+            f"🧼 **Cleaned message from {message.author.mention}:**\n{cleaned}"
+        )
+        return
 
-    with zipfile.ZipFile(zip_path, "r") as zip_ref:
-        zip_ref.extractall(temp_dir)
+    webhook = await get_or_create_webhook(message.channel)
 
-    for root, dirs, files in os.walk(temp_dir):
-        for file in files:
-            if file.endswith(".zip"):
-                continue
-
-            full_path = os.path.join(root, file)
-
-            with open(full_path, "r", encoding="utf-8", errors="ignore") as f:
-                content = f.read()
-
-            if content.strip().startswith("{"):
-                fixed = fix_json(content)
-            elif content.strip().startswith("<"):
-                fixed = fix_xml(content)
-            else:
-                fixed = content
-
-            with open(full_path, "w", encoding="utf-8") as f:
-                f.write(fixed)
-
-    with zipfile.ZipFile(output_zip_path, "w") as zip_out:
-        for root, dirs, files in os.walk(temp_dir):
-            for file in files:
-                if file == "fixed.zip":
-                    continue
-                full_path = os.path.join(root, file)
-                arcname = os.path.relpath(full_path, temp_dir)
-                zip_out.write(full_path, arcname)
-
-    await ctx.send(
-        content="Here is your fixed ZIP folder:",
-        file=discord.File(output_zip_path)
+    await webhook.send(
+        content=cleaned,
+        username=message.author.display_name,
+        avatar_url=message.author.display_avatar.url,
     )
+
+    await bot.process_commands(message)
 
 
 # -------------------------
@@ -466,8 +381,5 @@ if __name__ == "__main__":
     if not TOKEN:
         raise RuntimeError("Set DISCORD_BOT_TOKEN env var or hardcode your token.")
 
-    # Keep Render alive
     threading.Thread(target=run_flask).start()
-
-    # Start Discord bot
     bot.run(TOKEN)
