@@ -220,8 +220,9 @@ async def fixai(ctx):
         except Exception:
             # Soft fallback: keep structure instead of nuking
             summary["objects_rebuilt"] += 1
-            data = {"Objects": []}
+            return repaired  # return structurally fixed JSON text
 
+        # If parsed, enforce required fields
         if "Objects" not in data or not isinstance(data["Objects"], list):
             data["Objects"] = []
             summary["objects_rebuilt"] += 1
@@ -248,8 +249,7 @@ async def fixai(ctx):
                     new[k] = obj[k]
             fixed_objects.append(new)
 
-        final = json.dumps({"Objects": fixed_objects}, indent=4)
-        return final
+        return json.dumps({"Objects": fixed_objects}, indent=4)
 
     # -------------------------
     # XML MODEL
