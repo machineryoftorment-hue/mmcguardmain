@@ -160,6 +160,22 @@ async def fixai(ctx: commands.Context):
         await ctx.send(file=discord.File(buf, filename=out_name))
     except Exception:
         await ctx.send("AI repaired content:\n```text\n" + fixed[:1900] + "\n```")
+# ============================
+# HEALTH CHECK SERVER FOR RENDER
+# ============================
+
+from flask import Flask
+import threading
+
+app = Flask(__name__)
+
+@app.route("/")
+def home():
+    return "MMC Guard is running"
+
+def start_health_server():
+    # Render needs a port to bind to
+    app.run(host="0.0.0.0", port=8080)
 
 # ============================
 # 4. BOT START
