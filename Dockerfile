@@ -1,3 +1,7 @@
+# ============================
+# Dockerfile for Discord Bot + Ollama
+# ============================
+
 # Use Ubuntu as the base
 FROM ubuntu:22.04
 
@@ -20,5 +24,5 @@ RUN pip install -r requirements.txt
 # Expose Ollama port
 EXPOSE 11434
 
-# Start Ollama and your bot
-CMD ollama serve & python3 main.py
+# Start Ollama first, wait for it to boot, then run your bot
+CMD bash -c "ollama serve & sleep 10 && python3 main.py"
