@@ -27,6 +27,11 @@ def run_flask():
 BOT_TOKEN = os.getenv("DISCORD_BOT_TOKEN")
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 
+if not BOT_TOKEN:
+    print("ERROR: DISCORD_BOT_TOKEN is missing")
+if not GROQ_API_KEY:
+    print("ERROR: GROQ_API_KEY is missing")
+
 intents = discord.Intents.default()
 intents.message_content = True
 bot = commands.Bot(command_prefix="!", intents=intents)
@@ -45,7 +50,7 @@ def repair_file_with_ai(content: str) -> str:
     }
 
     data = {
-        "model": "llama-3.1-70b-versatile",   # ✔ Correct model name
+        "model": "llama-3.1-70b-versatile",
         "messages": [
             {
                 "role": "system",
@@ -64,14 +69,16 @@ def repair_file_with_ai(content: str) -> str:
         "temperature": 0
     }
 
-    # ✔ MUST be POST, not GET
-    resp = requests.post(url, headers=headers, json=data)
+    # ✔ MUST be POST
+    response = requests.post(url, headers=headers, json=data)
 
-    # Raise error if Groq rejects the request
-    resp.raise_for_status()
+    # Print Groq response for debugging
+    print("Groq status:", response.status_code)
+    print("Groq raw:", response.text)
 
-    result = resp.json()
-    return result["choices"][0]["message"]["content"].strip()
+    response.raise_for_status()
+
+    return response.json()["choices"][0]["message"]["content"].strip()
 
 
 # ============================
@@ -107,5 +114,5 @@ async def fixai(ctx):
 # Start Flask + Discord Bot
 # ============================
 
-threading.Thread(target=run_flask).start()
+threading.Thread(target=run_flask, daemon=True).start()
 bot.run(BOT_TOKEN)
