@@ -16,9 +16,9 @@ COPY . .
 # Install Python requirements
 RUN pip install -r requirements.txt
 
-# Expose Ollama + health port
-EXPOSE 11434
+# Expose ports
 EXPOSE 8080
+EXPOSE 11434
 
-# Start Ollama, wait, then run bot (health server starts inside main.py)
-CMD bash -c "ollama serve & sleep 10 && python3 main.py"
+# Start Ollama in background, then run main.py (Flask stays foreground)
+CMD bash -c "ollama serve & sleep 5 && python3 main.py"
