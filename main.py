@@ -2,6 +2,18 @@ import os
 import discord
 from discord.ext import commands
 import requests
+from flask import Flask
+import threading
+
+app = Flask(__name__)
+
+@app.route("/")
+def home():
+    return "Bot is running!"
+
+def run_flask():
+    app.run(host="0.0.0.0", port=10000)
+
 
 BOT_TOKEN = os.getenv("DISCORD_BOT_TOKEN")
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
@@ -65,4 +77,5 @@ async def fixai(ctx):
     out_name = attachment.filename.replace(".", "_fixed.")
     await ctx.send(file=discord.File(buf, out_name))
 
+threading.Thread(target=run_flask).start()
 bot.run(BOT_TOKEN)
