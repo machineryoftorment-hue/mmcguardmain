@@ -102,34 +102,44 @@ async def get_or_create_webhook(channel: discord.TextChannel) -> discord.Webhook
 # -------------------------
 
 async def call_ai_repair_engine(content: str) -> str:
-    api_key = os.getenv("HF_API_KEY")
+    api_key = os.getenv("OPENROUTER_API_KEY")
     if not api_key:
-        return "ERROR: HF_API_KEY is not set."
+        return "ERROR: OPENROUTER_API_KEY is not set."
 
-    url = "https://api-inference.huggingface.co/models/Qwen/Qwen2.5-7B-Instruct"
+    url = "https://openrouter.ai/api/v1/chat/completions"
+
+    payload = {
+        "model": "qwen/qwen-2-7b-instruct",  # free model
+        "messages": [
+            {
+                "role": "system",
+                "content": (
+                    "You are an expert JSON/XML repair engine. "
+                    "Fix malformed JSON or XML while preserving ALL values. "
+                    "Do not invent new values. "
+                    "Do not remove objects. "
+                    "Return ONLY the corrected file with no explanation."
+                )
+            },
+            {"role": "user", "content": content}
+        ],
+        "temperature": 0
+    }
 
     headers = {
         "Authorization": f"Bearer {api_key}",
+        "HTTP-Referer": "https://yourdomain.com",
+        "X-Title": "DiscordBot",
         "Content-Type": "application/json"
     }
 
-    payload = {
-        "inputs": (
-            "You are an expert JSON/XML repair engine.\n"
-            "Fix the following malformed JSON or XML while preserving ALL values.\n"
-            "Do not invent new values.\n"
-            "Do not remove objects.\n"
-            "Return ONLY the corrected file.\n\n"
-            f"{content}"
-        )
-    }
-
-    response = requests.post(url, headers=headers, json=payload)
+    response = requests.post(url, json=payload, headers=headers)
 
     try:
-        return response.json()[0]["generated_text"]
+        return response.json()["choices"][0]["message"]["content"]
     except Exception:
         return "AI ERROR:\n" + response.text
+
 
 
 # -------------------------
