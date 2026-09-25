@@ -16,7 +16,6 @@ def home():
     return "Bot is running!"
 
 def run_flask():
-    # Render will detect this port
     app.run(host="0.0.0.0", port=10000)
 
 
@@ -27,10 +26,8 @@ def run_flask():
 BOT_TOKEN = os.getenv("DISCORD_BOT_TOKEN")
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 
-if not BOT_TOKEN:
-    print("ERROR: DISCORD_BOT_TOKEN is missing")
-if not GROQ_API_KEY:
-    print("ERROR: GROQ_API_KEY is missing")
+print("DISCORD_BOT_TOKEN:", "SET" if BOT_TOKEN else "MISSING")
+print("GROQ_API_KEY:", "SET" if GROQ_API_KEY else "MISSING")
 
 intents = discord.Intents.default()
 intents.message_content = True
@@ -56,9 +53,7 @@ def repair_file_with_ai(content: str) -> str:
                 "role": "system",
                 "content": (
                     "You are an expert JSON/XML repair engine. "
-                    "Fix malformed JSON or XML while preserving ALL values. "
-                    "Do not invent new values. Do not remove objects. "
-                    "Return ONLY the corrected file."
+                    "Fix malformed JSON or XML while preserving ALL values."
                 )
             },
             {
@@ -69,10 +64,10 @@ def repair_file_with_ai(content: str) -> str:
         "temperature": 0
     }
 
-    # ✔ MUST be POST
+    print("Sending POST to Groq...")
+
     response = requests.post(url, headers=headers, json=data)
 
-    # Print Groq response for debugging
     print("Groq status:", response.status_code)
     print("Groq raw:", response.text)
 
