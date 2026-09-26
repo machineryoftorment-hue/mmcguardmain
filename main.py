@@ -39,7 +39,7 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 # ============================
 
 def repair_file_with_ai(content: str) -> str:
-    url = "https://api.groq.com/openai/v1/chat/completions"
+    url = "https://api.groq.com/v1/chat/completions"
 
     headers = {
         "Content-Type": "application/json",
