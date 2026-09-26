@@ -1,7 +1,7 @@
 import os
 import discord
 from discord.ext import commands
-import requests
+from groq import Groq
 from flask import Flask
 import threading
 
@@ -20,7 +20,7 @@ def run_flask():
 
 
 # ============================
-# Discord Bot Setup
+# Environment Variables
 # ============================
 
 BOT_TOKEN = os.getenv("DISCORD_BOT_TOKEN")
@@ -29,31 +29,37 @@ GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 print("DISCORD_BOT_TOKEN:", "SET" if BOT_TOKEN else "MISSING")
 print("GROQ_API_KEY:", "SET" if GROQ_API_KEY else "MISSING")
 
-intents = discord.Intents.default()
-intents.message_content = True
+
+# ============================
+# Discord Bot Setup
+# ============================
+
+intents = discord.Intents.all()
 bot = commands.Bot(command_prefix="!", intents=intents)
 
 
 # ============================
-# Groq AI Repair Function
+# Groq AI Client
+# ============================
+
+client = Groq(api_key=GROQ_API_KEY)
+
+
+# ============================
+# AI Repair Function
 # ============================
 
 def repair_file_with_ai(content: str) -> str:
-    url = "https://api.groq.com/openai/v1/chat/completions"
-
-    headers = {
-        "Content-Type": "application/json",
-        "Authorization": f"Bearer {GROQ_API_KEY}"
-    }
-
-    data = {
-        "model": "llama-3.1-70b-versatile",
-        "messages": [
+    completion = client.chat.completions.create(
+        model="llama-3.1-70b-versatile",
+        messages=[
             {
                 "role": "system",
                 "content": (
                     "You are an expert JSON/XML repair engine. "
-                    "Fix malformed JSON or XML while preserving ALL values."
+                    "Fix malformed JSON or XML while preserving ALL values. "
+                    "Do not invent new values. Do not remove objects. "
+                    "Return ONLY the corrected file."
                 )
             },
             {
@@ -61,19 +67,10 @@ def repair_file_with_ai(content: str) -> str:
                 "content": content
             }
         ],
-        "temperature": 0
-    }
+        temperature=0
+    )
 
-    print("Sending POST to Groq...")
-
-    response = requests.post(url, headers=headers, json=data)
-
-    print("Groq status:", response.status_code)
-    print("Groq raw:", response.text)
-
-    response.raise_for_status()
-
-    return response.json()["choices"][0]["message"]["content"].strip()
+    return completion.choices[0].message.content.strip()
 
 
 # ============================
