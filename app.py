@@ -268,7 +268,7 @@ def post_status():
             payload = {
                 "embeds": [
                     {
-                        "title": "🎮 UNITY PVE Nasdara",
+                        "title": "🎮 MMC Chernarus Rising",
                         "color": 3066993,
                         "fields": [
                             {
