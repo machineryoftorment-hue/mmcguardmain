@@ -40,7 +40,13 @@ def home():
 
 def get_server_info():
     try:
+
         url = f"https://api.nitrado.net/services/{SERVICE_ID}/gameservers"
+
+        print("=" * 50)
+        print("CHECKING NITRADO")
+        print("SERVICE ID:", SERVICE_ID)
+        print("TOKEN EXISTS:", bool(NITRADO_TOKEN))
 
         response = requests.get(
             url,
@@ -48,21 +54,40 @@ def get_server_info():
             timeout=15
         )
 
+        print("HTTP STATUS:", response.status_code)
+        print("RAW RESPONSE:")
+        print(response.text[:5000])
+
         if response.status_code != 200:
+            print("NITRADO REQUEST FAILED")
             return None
 
-        return response.json()
+        data = response.json()
+
+        print("JSON RESPONSE:")
+        print(data)
+
+        return data
 
     except Exception as e:
-        print("Nitrado Error:", e)
+        print("NITRADO ERROR:", e)
         return None
 
 
 def download_log():
 
     try:
+
+        print("=" * 50)
+        print("CONNECTING TO FTP")
+        print("HOST:", FTP_HOST)
+        print("USER:", FTP_USER)
+        print("PATH:", FTP_LOG_PATH)
+
         ftp = FTP(FTP_HOST)
         ftp.login(FTP_USER, FTP_PASS)
+
+        print("FTP LOGIN SUCCESS")
 
         local_file = "server.log"
 
@@ -72,12 +97,14 @@ def download_log():
                 f.write
             )
 
+        print("LOG DOWNLOADED")
+
         ftp.quit()
 
         return local_file
 
     except Exception as e:
-        print("FTP Error:", e)
+        print("FTP ERROR:", e)
         return None
 
 
@@ -86,6 +113,7 @@ def get_last_restart():
     logfile = download_log()
 
     if not logfile:
+        print("NO LOG FILE DOWNLOADED")
         return None
 
     with open(
@@ -97,6 +125,13 @@ def get_last_restart():
 
         lines = f.readlines()
 
+    print("LOG LINES:", len(lines))
+
+    print("LAST 20 LINES")
+
+    for line in lines[-20:]:
+        print(line.strip())
+
     restart_line = None
 
     for line in reversed(lines):
@@ -105,11 +140,11 @@ def get_last_restart():
             restart_line = line.strip()
             break
 
+    print("FOUND RESTART LINE:")
+    print(restart_line)
+
     if restart_line is None:
         return None
-
-    # Example:
-    # Thu, 29 Oct 2026 23:17:47 +0100 Server restart requested (WINDOWS)
 
     match = re.search(
         r"(\d{1,2}\s\w+\s\d{4}\s\d{2}:\d{2}:\d{2})",
@@ -117,16 +152,27 @@ def get_last_restart():
     )
 
     if not match:
+        print("REGEX FAILED")
         return None
 
     dt_string = match.group(1)
 
+    print("PARSED DATE:", dt_string)
+
     try:
-        return datetime.strptime(
+
+        parsed = datetime.strptime(
             dt_string,
             "%d %b %Y %H:%M:%S"
         )
-    except:
+
+        print("LAST RESTART:", parsed)
+
+        return parsed
+
+    except Exception as e:
+
+        print("DATE PARSE FAILED:", e)
         return None
 
 
@@ -145,6 +191,8 @@ def format_timedelta(td):
 
 def post_status():
 
+    print("BACKGROUND THREAD STARTED")
+
     while True:
 
         try:
@@ -158,24 +206,30 @@ def post_status():
 
             if server:
 
-                gs = server["data"]["gameserver"]
+                print("SERVER DATA FOUND")
 
-                status = "🟢 Online"
+                try:
+                    gs = server["data"]["gameserver"]
 
-                players = gs.get(
-                    "player_current",
-                    0
-                )
+                    status = "🟢 Online"
 
-                max_players = gs.get(
-                    "player_limit",
-                    0
-                )
+                    players = gs.get(
+                        "player_current",
+                        0
+                    )
 
-                server_name = gs.get(
-                    "hostname",
-                    "DayZ Server"
-                )
+                    max_players = gs.get(
+                        "player_limit",
+                        0
+                    )
+
+                    server_name = gs.get(
+                        "hostname",
+                        "DayZ Server"
+                    )
+
+                except Exception as e:
+                    print("JSON PARSE ERROR:", e)
 
             last_restart = get_last_restart()
 
@@ -214,54 +268,37 @@ def post_status():
             payload = {
                 "embeds": [
                     {
-                        "title":
-                        "🎮 UNITY PVE Nasdara",
+                        "title": "🎮 UNITY PVE Nasdara",
                         "color": 3066993,
                         "fields": [
                             {
-                                "name":
-                                "Server Status",
-                                "value":
-                                status,
-                                "inline":
-                                True
+                                "name": "Server Status",
+                                "value": status,
+                                "inline": True
                             },
                             {
-                                "name":
-                                "Players Online",
-                                "value":
-                                f"{players}/{max_players}",
-                                "inline":
-                                True
+                                "name": "Players Online",
+                                "value": f"{players}/{max_players}",
+                                "inline": True
                             },
                             {
-                                "name":
-                                "Next Restart",
-                                "value":
-                                next_restart_text,
-                                "inline":
-                                True
+                                "name": "Next Restart",
+                                "value": next_restart_text,
+                                "inline": True
                             },
                             {
-                                "name":
-                                "Last Restart",
-                                "value":
-                                f"{last_restart_text} ago",
-                                "inline":
-                                True
+                                "name": "Last Restart",
+                                "value": f"{last_restart_text} ago",
+                                "inline": True
                             },
                             {
-                                "name":
-                                "Server",
-                                "value":
-                                server_name,
-                                "inline":
-                                False
+                                "name": "Server",
+                                "value": server_name,
+                                "inline": False
                             }
                         ],
                         "footer": {
-                            "text":
-                            datetime.now().strftime(
+                            "text": datetime.now().strftime(
                                 "%d/%m/%Y %H:%M:%S"
                             )
                         }
@@ -275,13 +312,16 @@ def post_status():
                 timeout=15
             )
 
-            print("Status Updated")
+            print("STATUS UPDATED")
 
         except Exception as e:
-            print("Update Error:", e)
+
+            print("UPDATE ERROR:", e)
 
         time.sleep(300)
 
+
+print("STARTING DAYZ STATUS THREAD")
 
 threading.Thread(
     target=post_status,
