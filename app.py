@@ -18,11 +18,10 @@ FTP_HOST = os.getenv("FTP_HOST")
 FTP_USER = os.getenv("FTP_USER")
 FTP_PASS = os.getenv("FTP_PASS")
 
-FTP_LOG_PATH = "restart.log"
 # Discord
 WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK")
 
-# Restart interval
+# Restart interval (3 hours)
 RESTART_HOURS = 3
 
 HEADERS = {
@@ -71,29 +70,27 @@ def download_log():
         print("CONNECTING TO FTP")
         print("HOST:", FTP_HOST)
         print("USER:", FTP_USER)
-        print("PATH:", FTP_LOG_PATH)
 
         ftp = FTP(FTP_HOST)
         ftp.login(FTP_USER, FTP_PASS)
 
         print("FTP LOGIN SUCCESS")
 
-        print("=" * 50)
-        print("CURRENT DIRECTORY:")
-        print(ftp.pwd())
+        local_file = "restart.log"
 
-        print("=" * 50)
-        print("FILES AND FOLDERS:")
-        ftp.retrlines("LIST")
+        print("DOWNLOADING: restart.log")
 
-        print("=" * 50)
-
-        # STOP HERE FOR NOW
-        # We need to see what files exist first
+        with open(local_file, "wb") as f:
+            ftp.retrbinary(
+                "RETR restart.log",
+                f.write
+            )
 
         ftp.quit()
 
-        return None
+        print("LOG DOWNLOADED")
+
+        return local_file
 
     except Exception as e:
         print("FTP ERROR:", e)
@@ -114,6 +111,7 @@ def get_last_restart():
         encoding="utf-8",
         errors="ignore"
     ) as f:
+
         lines = f.readlines()
 
     restart_line = None
@@ -127,8 +125,14 @@ def get_last_restart():
             restart_line = line.strip()
             break
 
+    print("FOUND RESTART LINE:")
+    print(restart_line)
+
     if not restart_line:
         return None
+
+    # Matches:
+    # 2026-10-29 22:17:42 DayZ++ Restart Command
 
     match = re.search(
         r"(\d{4}-\d{2}-\d{2})\s(\d{2}:\d{2}:\d{2})",
@@ -136,20 +140,27 @@ def get_last_restart():
     )
 
     if not match:
+        print("FAILED TO PARSE RESTART LINE")
         return None
 
-    dt_string = (
-        f"{match.group(1)} "
-        f"{match.group(2)}"
-    )
-
     try:
-        return datetime.strptime(
+
+        dt_string = (
+            f"{match.group(1)} "
+            f"{match.group(2)}"
+        )
+
+        parsed = datetime.strptime(
             dt_string,
             "%Y-%m-%d %H:%M:%S"
         )
 
+        print("LAST RESTART:", parsed)
+
+        return parsed
+
     except Exception as e:
+
         print("PARSE ERROR:", e)
         return None
 
@@ -251,7 +262,7 @@ def post_status():
                         "color": 3066993,
                         "fields": [
                             {
-                                "name": "🟢 Server",
+                                "name": "🟢 Server Status",
                                 "value": status,
                                 "inline": True
                             },
@@ -309,7 +320,9 @@ threading.Thread(
 
 
 if __name__ == "__main__":
+    port = int(os.environ.get("PORT", 5000))
+
     app.run(
         host="0.0.0.0",
-        port=5000
+        port=port
     )
