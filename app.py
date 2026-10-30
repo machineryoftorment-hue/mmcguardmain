@@ -18,11 +18,7 @@ FTP_HOST = os.getenv("FTP_HOST")
 FTP_USER = os.getenv("FTP_USER")
 FTP_PASS = os.getenv("FTP_PASS")
 
-FTP_LOG_PATH = os.getenv(
-    "FTP_LOG_PATH",
-    "restart.log"
-)
-
+FTP_LOG_PATH = "restart.log"
 # Discord
 WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK")
 
