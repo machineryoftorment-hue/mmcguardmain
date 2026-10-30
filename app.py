@@ -17,9 +17,10 @@ SERVICE_ID = os.getenv("NITRADO_SERVICE_ID")
 FTP_HOST = os.getenv("FTP_HOST")
 FTP_USER = os.getenv("FTP_USER")
 FTP_PASS = os.getenv("FTP_PASS")
+
 FTP_LOG_PATH = os.getenv(
     "FTP_LOG_PATH",
-    "/games/ni9352260_806/ftproot/restart.log"
+    "restart.log"
 )
 
 # Discord
@@ -46,7 +47,6 @@ def get_server_info():
         print("=" * 50)
         print("CHECKING NITRADO")
         print("SERVICE ID:", SERVICE_ID)
-        print("TOKEN EXISTS:", bool(NITRADO_TOKEN))
 
         response = requests.get(
             url,
@@ -55,17 +55,12 @@ def get_server_info():
         )
 
         print("HTTP STATUS:", response.status_code)
-        print("RAW RESPONSE:")
-        print(response.text[:5000])
 
         if response.status_code != 200:
-            print("NITRADO REQUEST FAILED")
+            print(response.text)
             return None
 
         data = response.json()
-
-        print("JSON RESPONSE:")
-        print(data)
 
         return data
 
@@ -82,14 +77,19 @@ def download_log():
         print("CONNECTING TO FTP")
         print("HOST:", FTP_HOST)
         print("USER:", FTP_USER)
-        print("PATH:", FTP_LOG_PATH)
+        print("CURRENT FTP PATH:", FTP_LOG_PATH)
 
         ftp = FTP(FTP_HOST)
         ftp.login(FTP_USER, FTP_PASS)
 
         print("FTP LOGIN SUCCESS")
 
-        local_file = "server.log"
+        print("ROOT DIRECTORY:")
+        ftp.retrlines("LIST")
+
+        local_file = "restart.log"
+
+        print("ATTEMPTING DOWNLOAD:", FTP_LOG_PATH)
 
         with open(local_file, "wb") as f:
             ftp.retrbinary(
@@ -113,7 +113,6 @@ def get_last_restart():
     logfile = download_log()
 
     if not logfile:
-        print("NO LOG FILE DOWNLOADED")
         return None
 
     with open(
@@ -127,53 +126,49 @@ def get_last_restart():
 
     print("LOG LINES:", len(lines))
 
-    print("LAST 20 LINES")
-
-    for line in lines[-20:]:
-        print(line.strip())
-
     restart_line = None
 
     for line in reversed(lines):
 
-        if "Server restart requested" in line:
+        if (
+            "Server restart requested" in line
+            or "Restart Command" in line
+        ):
             restart_line = line.strip()
             break
 
     print("FOUND RESTART LINE:")
     print(restart_line)
 
-    if restart_line is None:
+    if not restart_line:
         return None
 
     match = re.search(
-        r"(\d{1,2}\s\w+\s\d{4}\s\d{2}:\d{2}:\d{2})",
+        r"(\d{4}-\d{2}-\d{2})\s(\d{2}:\d{2}:\d{2})",
         restart_line
     )
 
-    if not match:
-        print("REGEX FAILED")
-        return None
+    if match:
 
-    dt_string = match.group(1)
-
-    print("PARSED DATE:", dt_string)
-
-    try:
-
-        parsed = datetime.strptime(
-            dt_string,
-            "%d %b %Y %H:%M:%S"
+        dt_string = (
+            f"{match.group(1)} "
+            f"{match.group(2)}"
         )
 
-        print("LAST RESTART:", parsed)
+        try:
 
-        return parsed
+            parsed = datetime.strptime(
+                dt_string,
+                "%Y-%m-%d %H:%M:%S"
+            )
 
-    except Exception as e:
+            return parsed
 
-        print("DATE PARSE FAILED:", e)
-        return None
+        except Exception as e:
+
+            print("PARSE ERROR:", e)
+
+    return None
 
 
 def format_timedelta(td):
@@ -206,30 +201,46 @@ def post_status():
 
             if server:
 
-                print("SERVER DATA FOUND")
-
                 try:
+
                     gs = server["data"]["gameserver"]
 
                     status = "🟢 Online"
 
-                    players = gs.get(
+                    query = gs.get(
+                        "query",
+                        {}
+                    )
+
+                    players = query.get(
                         "player_current",
                         0
                     )
 
-                    max_players = gs.get(
-                        "player_limit",
+                    max_players = query.get(
+                        "player_max",
                         0
                     )
 
-                    server_name = gs.get(
-                        "hostname",
+                    server_name = query.get(
+                        "server_name",
                         "DayZ Server"
                     )
 
+                    print(
+                        f"Players: {players}/{max_players}"
+                    )
+
+                    print(
+                        f"Server Name: {server_name}"
+                    )
+
                 except Exception as e:
-                    print("JSON PARSE ERROR:", e)
+
+                    print(
+                        "JSON PARSE ERROR:",
+                        e
+                    )
 
             last_restart = get_last_restart()
 
@@ -252,12 +263,16 @@ def post_status():
                     now - last_restart
                 )
 
-                next_restart_text = format_timedelta(
-                    until_next
+                next_restart_text = (
+                    format_timedelta(
+                        until_next
+                    )
                 )
 
-                last_restart_text = format_timedelta(
-                    since_last
+                last_restart_text = (
+                    format_timedelta(
+                        since_last
+                    )
                 )
 
             else:
@@ -268,37 +283,55 @@ def post_status():
             payload = {
                 "embeds": [
                     {
-                        "title": "🎮 MMC Chernarus Rising",
-                        "color": 3066993,
+                        "title":
+                        "🎮 MMC: Chernarus Rising",
+                        "color":
+                        3066993,
                         "fields": [
                             {
-                                "name": "Server Status",
-                                "value": status,
-                                "inline": True
+                                "name":
+                                "🟢 Server",
+                                "value":
+                                status,
+                                "inline":
+                                True
                             },
                             {
-                                "name": "Players Online",
-                                "value": f"{players}/{max_players}",
-                                "inline": True
+                                "name":
+                                "👥 Players",
+                                "value":
+                                f"{players}/{max_players}",
+                                "inline":
+                                True
                             },
                             {
-                                "name": "Next Restart",
-                                "value": next_restart_text,
-                                "inline": True
+                                "name":
+                                "⏰ Next Restart",
+                                "value":
+                                next_restart_text,
+                                "inline":
+                                True
                             },
                             {
-                                "name": "Last Restart",
-                                "value": f"{last_restart_text} ago",
-                                "inline": True
+                                "name":
+                                "🔄 Last Restart",
+                                "value":
+                                f"{last_restart_text} ago",
+                                "inline":
+                                True
                             },
                             {
-                                "name": "Server",
-                                "value": server_name,
-                                "inline": False
+                                "name":
+                                "📡 Server Name",
+                                "value":
+                                server_name,
+                                "inline":
+                                False
                             }
                         ],
                         "footer": {
-                            "text": datetime.now().strftime(
+                            "text":
+                            datetime.now().strftime(
                                 "%d/%m/%Y %H:%M:%S"
                             )
                         }
