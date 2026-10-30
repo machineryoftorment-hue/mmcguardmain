@@ -8,6 +8,7 @@ import os
 import re
 
 app = Flask(__name__)
+
 print("VERSION = MMC TEST 999")
 
 # Nitrado API
@@ -22,7 +23,7 @@ FTP_PASS = os.getenv("FTP_PASS")
 # Discord
 WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK")
 
-# Restart interval (3 hours)
+# Restart interval (hours)
 RESTART_HOURS = 3
 
 HEADERS = {
@@ -79,7 +80,7 @@ def download_log():
 
         local_file = "restart.log"
 
-        print("DOWNLOADING: restart.log")
+        print("DOWNLOADING HARDCODED FILE: restart.log")
 
         with open(local_file, "wb") as f:
             ftp.retrbinary(
@@ -112,7 +113,6 @@ def get_last_restart():
         encoding="utf-8",
         errors="ignore"
     ) as f:
-
         lines = f.readlines()
 
     restart_line = None
@@ -131,9 +131,6 @@ def get_last_restart():
 
     if not restart_line:
         return None
-
-    # Matches:
-    # 2026-10-29 22:17:42 DayZ++ Restart Command
 
     match = re.search(
         r"(\d{4}-\d{2}-\d{2})\s(\d{2}:\d{2}:\d{2})",
@@ -219,8 +216,13 @@ def post_status():
                         "DayZ Server"
                     )
 
-                    print(f"Players: {players}/{max_players}")
-                    print(f"Server Name: {server_name}")
+                    print(
+                        f"Players: {players}/{max_players}"
+                    )
+
+                    print(
+                        f"Server Name: {server_name}"
+                    )
 
                 except Exception as e:
 
