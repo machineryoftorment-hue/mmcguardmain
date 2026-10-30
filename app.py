@@ -19,7 +19,7 @@ FTP_USER = os.getenv("FTP_USER")
 FTP_PASS = os.getenv("FTP_PASS")
 FTP_LOG_PATH = os.getenv(
     "FTP_LOG_PATH",
-    "/games/dayzps/config/dayzserver.log"
+    "/games/ni9352260_806/ftproot/restart.log"
 )
 
 # Discord
