@@ -8,6 +8,7 @@ import os
 import re
 
 app = Flask(__name__)
+print("VERSION = MMC TEST 999")
 
 # Nitrado API
 NITRADO_TOKEN = os.getenv("NITRADO_TOKEN")
