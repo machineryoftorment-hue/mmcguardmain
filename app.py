@@ -75,7 +75,7 @@ def download_log():
         print("CONNECTING TO FTP")
         print("HOST:", FTP_HOST)
         print("USER:", FTP_USER)
-        print("CURRENT FTP PATH:", FTP_LOG_PATH)
+        print("PATH:", FTP_LOG_PATH)
 
         ftp = FTP(FTP_HOST)
         ftp.login(FTP_USER, FTP_PASS)
@@ -87,27 +87,17 @@ def download_log():
         print(ftp.pwd())
 
         print("=" * 50)
-        print("FTP ROOT CONTENTS:")
-
+        print("FILES AND FOLDERS:")
         ftp.retrlines("LIST")
 
         print("=" * 50)
 
-        local_file = "restart.log"
-
-        print("ATTEMPTING DOWNLOAD:", FTP_LOG_PATH)
-
-        with open(local_file, "wb") as f:
-            ftp.retrbinary(
-                f"RETR {FTP_LOG_PATH}",
-                f.write
-            )
-
-        print("LOG DOWNLOADED")
+        # STOP HERE FOR NOW
+        # We need to see what files exist first
 
         ftp.quit()
 
-        return local_file
+        return None
 
     except Exception as e:
         print("FTP ERROR:", e)
@@ -130,8 +120,6 @@ def get_last_restart():
     ) as f:
         lines = f.readlines()
 
-    print("LOG LINES:", len(lines))
-
     restart_line = None
 
     for line in reversed(lines):
@@ -142,9 +130,6 @@ def get_last_restart():
         ):
             restart_line = line.strip()
             break
-
-    print("FOUND RESTART LINE:")
-    print(restart_line)
 
     if not restart_line:
         return None
@@ -163,14 +148,12 @@ def get_last_restart():
     )
 
     try:
-
         return datetime.strptime(
             dt_string,
             "%Y-%m-%d %H:%M:%S"
         )
 
     except Exception as e:
-
         print("PARSE ERROR:", e)
         return None
 
@@ -211,10 +194,7 @@ def post_status():
 
                     status = "🟢 Online"
 
-                    query = gs.get(
-                        "query",
-                        {}
-                    )
+                    query = gs.get("query", {})
 
                     players = query.get(
                         "player_current",
@@ -231,13 +211,8 @@ def post_status():
                         "DayZ Server"
                     )
 
-                    print(
-                        f"Players: {players}/{max_players}"
-                    )
-
-                    print(
-                        f"Server Name: {server_name}"
-                    )
+                    print(f"Players: {players}/{max_players}")
+                    print(f"Server Name: {server_name}")
 
                 except Exception as e:
 
