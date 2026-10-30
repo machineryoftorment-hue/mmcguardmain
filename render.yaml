@@ -1,7 +1,6 @@
 services:
   - type: web
-    name: mmc-bot
-    env: docker
-    plan: free
-    dockerfilePath: Dockerfile
-    autoDeploy: true
+    name: dayz-status
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn app:app
