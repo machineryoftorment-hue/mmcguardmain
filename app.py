@@ -60,9 +60,7 @@ def get_server_info():
             print(response.text)
             return None
 
-        data = response.json()
-
-        return data
+        return response.json()
 
     except Exception as e:
         print("NITRADO ERROR:", e)
@@ -84,8 +82,16 @@ def download_log():
 
         print("FTP LOGIN SUCCESS")
 
-        print("ROOT DIRECTORY:")
+        print("=" * 50)
+        print("CURRENT DIRECTORY:")
+        print(ftp.pwd())
+
+        print("=" * 50)
+        print("FTP ROOT CONTENTS:")
+
         ftp.retrlines("LIST")
+
+        print("=" * 50)
 
         local_file = "restart.log"
 
@@ -113,6 +119,7 @@ def get_last_restart():
     logfile = download_log()
 
     if not logfile:
+        print("NO LOG FILE DOWNLOADED")
         return None
 
     with open(
@@ -121,7 +128,6 @@ def get_last_restart():
         encoding="utf-8",
         errors="ignore"
     ) as f:
-
         lines = f.readlines()
 
     print("LOG LINES:", len(lines))
@@ -148,27 +154,25 @@ def get_last_restart():
         restart_line
     )
 
-    if match:
+    if not match:
+        return None
 
-        dt_string = (
-            f"{match.group(1)} "
-            f"{match.group(2)}"
+    dt_string = (
+        f"{match.group(1)} "
+        f"{match.group(2)}"
+    )
+
+    try:
+
+        return datetime.strptime(
+            dt_string,
+            "%Y-%m-%d %H:%M:%S"
         )
 
-        try:
+    except Exception as e:
 
-            parsed = datetime.strptime(
-                dt_string,
-                "%Y-%m-%d %H:%M:%S"
-            )
-
-            return parsed
-
-        except Exception as e:
-
-            print("PARSE ERROR:", e)
-
-    return None
+        print("PARSE ERROR:", e)
+        return None
 
 
 def format_timedelta(td):
@@ -248,31 +252,20 @@ def post_status():
 
                 next_restart = (
                     last_restart +
-                    timedelta(
-                        hours=RESTART_HOURS
-                    )
+                    timedelta(hours=RESTART_HOURS)
                 )
 
                 now = datetime.now()
 
-                until_next = (
-                    next_restart - now
+                until_next = next_restart - now
+                since_last = now - last_restart
+
+                next_restart_text = format_timedelta(
+                    until_next
                 )
 
-                since_last = (
-                    now - last_restart
-                )
-
-                next_restart_text = (
-                    format_timedelta(
-                        until_next
-                    )
-                )
-
-                last_restart_text = (
-                    format_timedelta(
-                        since_last
-                    )
+                last_restart_text = format_timedelta(
+                    since_last
                 )
 
             else:
@@ -283,55 +276,37 @@ def post_status():
             payload = {
                 "embeds": [
                     {
-                        "title":
-                        "🎮 MMC: Chernarus Rising",
-                        "color":
-                        3066993,
+                        "title": "🎮 MMC: Chernarus Rising",
+                        "color": 3066993,
                         "fields": [
                             {
-                                "name":
-                                "🟢 Server",
-                                "value":
-                                status,
-                                "inline":
-                                True
+                                "name": "🟢 Server",
+                                "value": status,
+                                "inline": True
                             },
                             {
-                                "name":
-                                "👥 Players",
-                                "value":
-                                f"{players}/{max_players}",
-                                "inline":
-                                True
+                                "name": "👥 Players",
+                                "value": f"{players}/{max_players}",
+                                "inline": True
                             },
                             {
-                                "name":
-                                "⏰ Next Restart",
-                                "value":
-                                next_restart_text,
-                                "inline":
-                                True
+                                "name": "⏰ Next Restart",
+                                "value": next_restart_text,
+                                "inline": True
                             },
                             {
-                                "name":
-                                "🔄 Last Restart",
-                                "value":
-                                f"{last_restart_text} ago",
-                                "inline":
-                                True
+                                "name": "🔄 Last Restart",
+                                "value": f"{last_restart_text} ago",
+                                "inline": True
                             },
                             {
-                                "name":
-                                "📡 Server Name",
-                                "value":
-                                server_name,
-                                "inline":
-                                False
+                                "name": "📡 Server Name",
+                                "value": server_name,
+                                "inline": False
                             }
                         ],
                         "footer": {
-                            "text":
-                            datetime.now().strftime(
+                            "text": datetime.now().strftime(
                                 "%d/%m/%Y %H:%M:%S"
                             )
                         }
