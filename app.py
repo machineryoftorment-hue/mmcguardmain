@@ -9,7 +9,7 @@ import re
 
 app = Flask(__name__)
 
-print("VERSION = MMC TEST 999")
+print("VERSION = MMC TEST 1000")
 
 # Nitrado API
 NITRADO_TOKEN = os.getenv("NITRADO_TOKEN")
@@ -77,6 +77,7 @@ def download_log():
         ftp.login(FTP_USER, FTP_PASS)
 
         print("FTP LOGIN SUCCESS")
+        print("DOWNLOAD_LOG V2 RUNNING")
 
         local_file = "restart.log"
 
@@ -95,7 +96,7 @@ def download_log():
         return local_file
 
     except Exception as e:
-        print("FTP ERROR:", e)
+        print("FTP ERROR:", repr(e))
         return None
 
 
