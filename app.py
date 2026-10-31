@@ -1,167 +1,30 @@
 from flask import Flask
-from ftplib import FTP
 from datetime import datetime, timedelta
 import requests
 import threading
 import time
 import os
-import re
 
 app = Flask(__name__)
 
-print("VERSION = MMC TEST 1000")
+print("MMC RESTART TIMER VERSION")
 
-# Nitrado API
-NITRADO_TOKEN = os.getenv("NITRADO_TOKEN")
-SERVICE_ID = os.getenv("NITRADO_SERVICE_ID")
-
-# FTP
-FTP_HOST = os.getenv("FTP_HOST")
-FTP_USER = os.getenv("FTP_USER")
-FTP_PASS = os.getenv("FTP_PASS")
-
-# Discord
+# Discord Webhook
 WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK")
 
-# Restart interval (hours)
-RESTART_HOURS = 3
+# Average restart interval from logs
+RESTART_INTERVAL = timedelta(minutes=197)
 
-HEADERS = {
-    "Authorization": f"Bearer {NITRADO_TOKEN}"
-}
+# Last known startup from logs
+BASE_RESTART = datetime(
+    2026, 10, 31,
+    1, 35, 43
+)
 
 
 @app.route("/")
 def home():
     return "DayZ Status Bot Online"
-
-
-def get_server_info():
-    try:
-
-        url = f"https://api.nitrado.net/services/{SERVICE_ID}/gameservers"
-
-        print("=" * 50)
-        print("CHECKING NITRADO")
-        print("SERVICE ID:", SERVICE_ID)
-
-        response = requests.get(
-            url,
-            headers=HEADERS,
-            timeout=15
-        )
-
-        print("HTTP STATUS:", response.status_code)
-
-        if response.status_code != 200:
-            print(response.text)
-            return None
-
-        return response.json()
-
-    except Exception as e:
-        print("NITRADO ERROR:", e)
-        return None
-
-
-def download_log():
-
-    try:
-
-        print("=" * 50)
-        print("CONNECTING TO FTP")
-        print("HOST:", FTP_HOST)
-        print("USER:", FTP_USER)
-
-        ftp = FTP(FTP_HOST)
-        ftp.login(FTP_USER, FTP_PASS)
-
-        print("FTP LOGIN SUCCESS")
-        print("DOWNLOAD_LOG V2 RUNNING")
-
-        local_file = "restart.log"
-
-        print("DOWNLOADING HARDCODED FILE: restart.log")
-
-        with open(local_file, "wb") as f:
-            ftp.retrbinary(
-                "RETR restart.log",
-                f.write
-            )
-
-        ftp.quit()
-
-        print("LOG DOWNLOADED")
-
-        return local_file
-
-    except Exception as e:
-        print("FTP ERROR:", repr(e))
-        return None
-
-
-def get_last_restart():
-
-    logfile = download_log()
-
-    if not logfile:
-        print("NO LOG FILE DOWNLOADED")
-        return None
-
-    with open(
-        logfile,
-        "r",
-        encoding="utf-8",
-        errors="ignore"
-    ) as f:
-        lines = f.readlines()
-
-    restart_line = None
-
-    for line in reversed(lines):
-
-        if (
-            "Server restart requested" in line
-            or "Restart Command" in line
-        ):
-            restart_line = line.strip()
-            break
-
-    print("FOUND RESTART LINE:")
-    print(restart_line)
-
-    if not restart_line:
-        return None
-
-    match = re.search(
-        r"(\d{4}-\d{2}-\d{2})\s(\d{2}:\d{2}:\d{2})",
-        restart_line
-    )
-
-    if not match:
-        print("FAILED TO PARSE RESTART LINE")
-        return None
-
-    try:
-
-        dt_string = (
-            f"{match.group(1)} "
-            f"{match.group(2)}"
-        )
-
-        parsed = datetime.strptime(
-            dt_string,
-            "%Y-%m-%d %H:%M:%S"
-        )
-
-        print("LAST RESTART:", parsed)
-
-        return parsed
-
-    except Exception as e:
-
-        print("PARSE ERROR:", e)
-        return None
 
 
 def format_timedelta(td):
@@ -172,127 +35,125 @@ def format_timedelta(td):
         total = 0
 
     hours = total // 3600
-    mins = (total % 3600) // 60
+    minutes = (total % 3600) // 60
 
-    return f"{hours}h {mins}m"
+    return f"{hours}h {minutes}m"
+
+
+def get_restart_times():
+
+    now = datetime.now()
+
+    last_restart = BASE_RESTART
+
+    while (
+        last_restart + RESTART_INTERVAL
+    ) <= now:
+
+        last_restart += RESTART_INTERVAL
+
+    next_restart = (
+        last_restart + RESTART_INTERVAL
+    )
+
+    return (
+        last_restart,
+        next_restart
+    )
 
 
 def post_status():
 
-    print("BACKGROUND THREAD STARTED")
+    print(
+        "BACKGROUND THREAD STARTED"
+    )
 
     while True:
 
         try:
 
-            status = "🔴 Offline"
-            players = 0
-            max_players = 0
-            server_name = "Unknown"
+            now = datetime.now()
 
-            server = get_server_info()
+            (
+                last_restart,
+                next_restart
+            ) = get_restart_times()
 
-            if server:
+            time_since = (
+                now - last_restart
+            )
 
-                try:
-
-                    gs = server["data"]["gameserver"]
-
-                    status = "🟢 Online"
-
-                    query = gs.get("query", {})
-
-                    players = query.get(
-                        "player_current",
-                        0
-                    )
-
-                    max_players = query.get(
-                        "player_max",
-                        0
-                    )
-
-                    server_name = query.get(
-                        "server_name",
-                        "DayZ Server"
-                    )
-
-                    print(
-                        f"Players: {players}/{max_players}"
-                    )
-
-                    print(
-                        f"Server Name: {server_name}"
-                    )
-
-                except Exception as e:
-
-                    print(
-                        "JSON PARSE ERROR:",
-                        e
-                    )
-
-            last_restart = get_last_restart()
-
-            if last_restart:
-
-                next_restart = (
-                    last_restart +
-                    timedelta(hours=RESTART_HOURS)
-                )
-
-                now = datetime.now()
-
-                until_next = next_restart - now
-                since_last = now - last_restart
-
-                next_restart_text = format_timedelta(
-                    until_next
-                )
-
-                last_restart_text = format_timedelta(
-                    since_last
-                )
-
-            else:
-
-                next_restart_text = "Unknown"
-                last_restart_text = "Unknown"
+            time_until = (
+                next_restart - now
+            )
 
             payload = {
                 "embeds": [
                     {
-                        "title": "🎮 MMC: Chernarus Rising",
-                        "color": 3066993,
+                        "title":
+                        "🎮 MMC: Chernarus Rising",
+
+                        "color":
+                        3066993,
+
                         "fields": [
                             {
-                                "name": "🟢 Server Status",
-                                "value": status,
-                                "inline": True
+                                "name":
+                                "🟢 Server Status",
+
+                                "value":
+                                "Online",
+
+                                "inline":
+                                True
                             },
                             {
-                                "name": "👥 Players",
-                                "value": f"{players}/{max_players}",
-                                "inline": True
+                                "name":
+                                "👥 Players",
+
+                                "value":
+                                "Unknown",
+
+                                "inline":
+                                True
                             },
                             {
-                                "name": "⏰ Next Restart",
-                                "value": next_restart_text,
-                                "inline": True
+                                "name":
+                                "⏰ Next Restart",
+
+                                "value":
+                                format_timedelta(
+                                    time_until
+                                ),
+
+                                "inline":
+                                True
                             },
                             {
-                                "name": "🔄 Last Restart",
-                                "value": f"{last_restart_text} ago",
-                                "inline": True
+                                "name":
+                                "🔄 Last Restart",
+
+                                "value":
+                                f"{format_timedelta(time_since)} ago",
+
+                                "inline":
+                                True
                             },
                             {
-                                "name": "📡 Server Name",
-                                "value": server_name,
-                                "inline": False
+                                "name":
+                                "🕒 Restart Interval",
+
+                                "value":
+                                "3h 17m",
+
+                                "inline":
+                                True
                             }
                         ],
+
                         "footer": {
-                            "text": datetime.now().strftime(
+                            "text":
+                            now.strftime(
                                 "%d/%m/%Y %H:%M:%S"
                             )
                         }
@@ -306,16 +167,19 @@ def post_status():
                 timeout=15
             )
 
-            print("STATUS UPDATED")
+            print(
+                "STATUS UPDATED"
+            )
 
         except Exception as e:
 
-            print("UPDATE ERROR:", e)
+            print(
+                "UPDATE ERROR:",
+                e
+            )
 
         time.sleep(300)
 
-
-print("STARTING DAYZ STATUS THREAD")
 
 threading.Thread(
     target=post_status,
@@ -324,7 +188,13 @@ threading.Thread(
 
 
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 5000))
+
+    port = int(
+        os.environ.get(
+            "PORT",
+            5000
+        )
+    )
 
     app.run(
         host="0.0.0.0",
