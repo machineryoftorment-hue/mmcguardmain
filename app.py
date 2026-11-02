@@ -7,7 +7,7 @@ import time
 import os
 
 app = Flask(__name__)
-
+rrerererererrrerrerer
 print("MMC FIXED SCHEDULE VERSION")
 
 WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK")
